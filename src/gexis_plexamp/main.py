@@ -74,6 +74,7 @@ class Plugin:
         self._active = False
         self._available = False
         self._last: dict = {}
+        self._volume: int | None = None
 
     # --- what the core asks of us ------------------------------------------
 
@@ -98,7 +99,13 @@ class Plugin:
         if t == "transport":
             return self._transport(message.get("command"), message.get("argument"))
         if t == "set_volume":
-            self.player.set_volume(_scaled(message.get("value"), message.get("steps")))
+            level = _scaled(message.get("value"), message.get("steps"))
+            # Remembered before it is sent, so the poll that follows does not
+            # read our own write back and report it to the core as if somebody
+            # had turned the knob - the echo every volume path here has had to
+            # deal with (Findings 045 and 047).
+            self._volume = level
+            self.player.set_volume(level)
             return True
         if t == "setting":
             return self._setting(message.get("key"), message.get("value"))
@@ -147,6 +154,7 @@ class Plugin:
                 continue
             await self._available_is(True)
             await self._edges(timeline)
+            await self._volume_is(timeline.volume)
             await self._metadata(timeline)
             await asyncio.sleep(POLL_S)
 
@@ -165,6 +173,22 @@ class Plugin:
             # same distinction ADR-0010 draws for everyone else.
             self._active = False
             await self.core.event("release")
+
+    async def _volume_is(self, level) -> None:
+        """Plexamp's own level, when it changes.
+
+        **Only on a change**, and that matters more here than for metadata: the
+        core applies a reported level to the hardware mixer, so a report every
+        second would be a write to the DAC every second for a number that did
+        not move.
+        """
+        if level is None or level == self._volume:
+            return
+        self._volume = level
+        # Plexamp's scale is already 0-100, which is the scale the contract
+        # normalises to - so `steps` is not a conversion here, it is a
+        # statement of which scale the number is on.
+        await self.core.event("volume", value=int(level), steps=100)
 
     async def _metadata(self, timeline) -> None:
         metadata = {

@@ -204,3 +204,36 @@ async def test_repeat_is_a_word_not_a_flag(plex, contract):
     plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
     await plugin._metadata(_timeline("playing", repeat=plex))
     assert plugin.core.events[0][1]["metadata"]["repeat"] == contract
+
+
+# --- volume -----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_players_own_level_is_reported_when_it_changes():
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin._volume_is(56)
+    await plugin._volume_is(56)
+    await plugin._volume_is(70)
+    assert [(t, f["value"]) for t, f in plugin.core.events] == [
+        ("volume", 56), ("volume", 70)]
+
+
+@pytest.mark.asyncio
+async def test_no_level_at_all_is_not_a_report():
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin._volume_is(None)
+    assert plugin.core.events == []
+
+
+@pytest.mark.asyncio
+async def test_our_own_write_is_not_read_back_as_somebody_turning_the_knob():
+    """**The echo every volume path in this project has had to deal with**
+    (Gexis Findings 045 and 047). The core sets the volume; a poll a moment
+    later reads that same number off the player; reporting it would be the
+    daemon told that the user changed something."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin.command("set_volume", {"value": 42, "steps": 100})
+    assert plugin.player.calls == [("set_volume", (42,))]
+    await plugin._volume_is(42)
+    assert plugin.core.events == []
