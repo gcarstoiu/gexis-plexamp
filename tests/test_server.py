@@ -86,3 +86,38 @@ def test_a_failure_is_remembered_so_it_is_not_retried_every_second(monkeypatch, 
     for _ in range(4):
         library.for_track(one)
     assert calls == ["1"]
+
+
+# --- George's condition, 2026-09-25 -----------------------------------------
+
+
+@pytest.mark.parametrize("address, local", [
+    ("192.168.178.191", True), ("10.0.0.5", True), ("172.16.4.4", True),
+    ("127.0.0.1", True), ("169.254.3.3", True),
+    ("8.8.8.8", False), ("1.1.1.1", False),
+    # TEST-NET-3 is *not* routable on the internet, so it counts as local -
+    # which looks wrong until you say the question out loud. It was a bad test
+    # case, not a bad answer.
+    ("203.0.113.9", True),
+    # A hostname could resolve anywhere, and the safe answer to "I cannot tell"
+    # is no.
+    ("plex.example.com", False), ("", False), (None, False),
+])
+def test_only_a_server_on_this_network_counts_as_local(address, local):
+    """**George, 2026-09-25:** *"If the calls stay inside the local network then
+    it is fine to keep it like this."* The artwork URL carries a Plex token, so
+    the condition is checked rather than assumed - Plexamp will happily play
+    from a server anywhere."""
+    from gexis_plexamp.server import is_local
+
+    assert is_local(address) is local
+
+
+def test_artwork_is_omitted_for_a_server_that_is_not_local(tmp_path, monkeypatch):
+    """Omitted rather than sent tokenless: a Plex thumb without a token is a
+    401, and a panel drawing a broken image is worse than one falling back."""
+    (tmp_path / "%40Plexamp%3Auser%3Atoken").write_text("Stok")
+    library = Library(settings_dir=tmp_path)
+    assert library._artwork("http://8.8.8.8:32400", "/thumb/1", "tok", "8.8.8.8") is None
+    assert library._artwork("http://10.0.0.5:32400", "/thumb/1", "tok", "10.0.0.5") == (
+        "http://10.0.0.5:32400/thumb/1?X-Plex-Token=tok")

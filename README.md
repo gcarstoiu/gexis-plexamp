@@ -34,10 +34,14 @@ for a second time — the user already gave it when they claimed the player, and
 second copy is a second thing to go stale.
 
 **The artwork URL carries that token**, and the Gexis core publishes its state
-to the local network. That is a real consideration and it is written up in the
-Gexis repository as Finding 083; if it matters to you, set
-`supports_artwork: false` in `CAPABILITIES` and the panel falls back to its own
-cover lookup.
+to the local network — which is fine for a Plex server in the next room and not
+fine for one on the internet. So artwork is published **only when the server's
+address is not globally routable**. A remote server, or a hostname that could
+resolve anywhere, gets no artwork and the panel falls back to its own cover
+lookup.
+
+If you would rather it never published one, set `supports_artwork: false` in
+`CAPABILITIES`.
 
 ## What it does not do yet
 
