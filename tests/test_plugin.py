@@ -136,7 +136,6 @@ def test_what_we_declare_is_what_we_implement():
     panel would offer the control and the command would fail."""
     declared = set(hello()["capabilities"]["controls"])
     assert declared == {"play", "pause", "next", "previous", "shuffle", "repeat"}
-    assert hello()["capabilities"]["supports_artwork"] is False
 
 
 @pytest.mark.parametrize("value, steps, expected", [
@@ -149,3 +148,59 @@ def test_volume_scales_onto_plexamps_own_0_to_100(value, steps, expected):
 @pytest.mark.parametrize("ms, seconds", [(0, 0), (1000, 1), (1499, 1), (1500, 2), (None, None)])
 def test_positions_are_seconds(ms, seconds):
     assert _seconds(ms) == seconds
+
+
+# --- metadata ---------------------------------------------------------------
+
+
+class FakeLibrary:
+    def __init__(self, answer=None):
+        self.answer = answer or {}
+        self.asked = 0
+
+    def for_track(self, timeline):
+        self.asked += 1
+        return self.answer
+
+
+@pytest.mark.asyncio
+async def test_what_is_playing_joins_what_is_happening():
+    """The timeline says *what is happening*; the server says *what is
+    playing*. The panel needs one object with both."""
+    library = FakeLibrary({"title": "Heaven", "artist": "Prince", "album": "Timeless"})
+    plugin = Plugin(FakeCore(), FakePlayer(), library)
+    await plugin._metadata(_timeline("playing", time="6000", duration="328228"))
+    sent = plugin.core.events[0][1]["metadata"]
+    assert sent["title"] == "Heaven"
+    assert sent["artist"] == "Prince"
+    assert sent["position"] == 6
+    assert sent["duration"] == 328
+
+
+@pytest.mark.asyncio
+async def test_a_track_with_no_server_answer_still_reports_position():
+    """A server that cannot be read costs the name of the song, not the
+    progress bar."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary({}))
+    await plugin._metadata(_timeline("playing", time="1000", duration="2000"))
+    sent = plugin.core.events[0][1]["metadata"]
+    assert "title" not in sent
+    assert sent["position"] == 1
+
+
+def test_artwork_is_declared_now_that_it_is_fetched():
+    assert hello()["capabilities"]["supports_artwork"] is True
+    # Still false, and deliberately: the timeline does not carry a sample rate
+    # and the server describes the file rather than what the DAC was handed.
+    assert hello()["capabilities"]["supports_sample_rate"] is False
+
+
+@pytest.mark.parametrize("plex, contract", [("0", "off"), ("1", "one"), ("2", "all")])
+@pytest.mark.asyncio
+async def test_repeat_is_a_word_not_a_flag(plex, contract):
+    """The contract's `repeat` is off / all / one, because a panel has to draw
+    which. Plex counts 0 / 1 / 2, and `1` is one track - the opposite order to
+    how most people would guess."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin._metadata(_timeline("playing", repeat=plex))
+    assert plugin.core.events[0][1]["metadata"]["repeat"] == contract

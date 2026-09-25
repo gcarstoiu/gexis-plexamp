@@ -19,6 +19,7 @@ import os
 
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
+from gexis_plexamp.server import Library
 
 logger = logging.getLogger("gexis_plexamp")
 
@@ -36,10 +37,17 @@ POLL_S = 1.0
 #: a renderer that was going to let go on its own.
 RELEASE_LADDER = {"polite_grace": 16.0, "sigterm_grace": 3.0, "sigkill_grace": 2.0}
 
+#: Plex's repeat numbers to the contract's words. `1` is one track, `2` is the
+#: whole queue - which is the opposite order to how most people would guess.
+REPEAT = {"0": "off", "1": "one", "2": "all"}
+
 CAPABILITIES = {
     "audio_connection": "output",
     "acquisition_events": ["playback started from a Plex controller"],
-    "supports_artwork": False,
+    # Artwork comes from the Plex server, not the player - see `server.py`.
+    # Sample rate does not come at all: the timeline does not carry it and the
+    # server's answer describes the file, not what the DAC was handed.
+    "supports_artwork": True,
     "supports_sample_rate": False,
     "volume_managed": True,
     "volume_mechanism": "software_api",
@@ -59,9 +67,10 @@ def hello() -> dict:
 
 
 class Plugin:
-    def __init__(self, core: Core, player: Plexamp) -> None:
+    def __init__(self, core: Core, player: Plexamp, library: Library | None = None) -> None:
         self.core = core
         self.player = player
+        self.library = library if library is not None else Library()
         self._active = False
         self._available = False
         self._last: dict = {}
@@ -164,7 +173,13 @@ class Plugin:
             "transport": "playing" if timeline.playing else timeline.state,
             "source_type": "stream",
             "shuffle": timeline.shuffle,
-            "repeat": timeline.repeat != "0",
+            # **A word, not a flag.** The contract's `repeat` is
+            # off / all / one, because a panel has to draw which; Plex's own
+            # vocabulary is 0 / 1 / 2 and this is the translation.
+            "repeat": REPEAT.get(timeline.repeat, "off"),
+            # What is playing, as opposed to what is happening. One request per
+            # track, not per poll - see `server.Library`.
+            **self.library.for_track(timeline),
         }
         # Only when something changed. The core publishes every event to every
         # panel, and a metadata line per second per renderer is a redraw per
@@ -188,6 +203,7 @@ def _scaled(value, steps):
 
 async def run(socket_path: str, base: str) -> None:
     player = Plexamp(base)
+    library = Library()
     while True:
         core = Core(socket_path)
         try:
@@ -203,7 +219,7 @@ async def run(socket_path: str, base: str) -> None:
             logger.info("cannot reach the core (%s); retrying", exc)
             await asyncio.sleep(RECONNECT_S)
             continue
-        plugin = Plugin(core, player)
+        plugin = Plugin(core, player, library)
         watching = asyncio.ensure_future(plugin.watch())
         try:
             await core.serve(plugin.command)

@@ -12,6 +12,7 @@ nobody was watching.
 from __future__ import annotations
 
 import logging
+import re
 import urllib.error
 import urllib.request
 from xml.etree import ElementTree
@@ -41,7 +42,8 @@ class Timeline:
     """One poll's music timeline, with the attributes this plugin acts on."""
 
     __slots__ = ("state", "time_ms", "duration_ms", "volume", "shuffle",
-                 "repeat", "controllable", "key", "rating_key")
+                 "repeat", "controllable", "key", "rating_key",
+                 "address", "port", "machine")
 
     def __init__(self, attrib: dict) -> None:
         self.state = attrib.get("state", "stopped")
@@ -55,6 +57,13 @@ class Timeline:
         )
         self.key = attrib.get("key")
         self.rating_key = attrib.get("ratingKey")
+        #: **Where the track's metadata lives.** The player's timeline carries
+        #: position and duration and nothing about the music; title, artist and
+        #: album are on the Plex Media Server, and these three are how to reach
+        #: it. Absent when nothing is playing.
+        self.address = unwrap(attrib.get("address"))
+        self.port = _int(attrib.get("port")) or 32400
+        self.machine = attrib.get("machineIdentifier")
 
     @property
     def playing(self) -> bool:
@@ -62,6 +71,28 @@ class Timeline:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging only
         return f"<Timeline {self.state} {self.time_ms}/{self.duration_ms}>"
+
+
+#: `192-168-178-191.<hash>.plex.direct` - a real IP with dots swapped for
+#: dashes, wrapped in a hostname whose certificate Plex owns. Resolving it means
+#: a DNS round trip to reach a machine on this LAN, and trusting a certificate
+#: chain to talk to it; unwrapping it is the same address without either.
+#: moOde's Route B had to do exactly this, and Finding 077 recorded the shape
+#: before anything here needed it.
+PLEX_DIRECT = re.compile(r"^(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})\.[^.]+\.plex\.direct$")
+
+
+def unwrap(address):
+    """A `plex.direct` hostname as the plain address it encodes, or unchanged.
+
+    **Unchanged is the right answer for anything else.** A remote server, or a
+    shape this does not recognise, is still reachable by the name Plex gave -
+    just not by us shortcutting it.
+    """
+    if not address:
+        return None
+    match = PLEX_DIRECT.match(address)
+    return ".".join(match.groups()) if match else address
 
 
 def _int(raw):

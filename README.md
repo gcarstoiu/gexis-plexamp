@@ -20,14 +20,33 @@ the exercise that decides it.
 - Answers the core's commands: the polite release, transport, volume.
 - Reports position, duration and transport state.
 
+## Where the names come from
+
+The player's timeline says *what is happening* — playing, six seconds into five
+and a half minutes. It says nothing about *what is playing*: title, artist,
+album and artwork are on the Plex Media Server, fetched once per track and
+cached. A poll every second that also fetched metadata every second would be a
+request per second to somebody's NAS for an answer that changes when the song
+does.
+
+**The Plex token is Plexamp's own**, read from its settings rather than asked
+for a second time — the user already gave it when they claimed the player, and a
+second copy is a second thing to go stale.
+
+**The artwork URL carries that token**, and the Gexis core publishes its state
+to the local network. That is a real consideration and it is written up in the
+Gexis repository as Finding 083; if it matters to you, set
+`supports_artwork: false` in `CAPABILITIES` and the panel falls back to its own
+cover lookup.
+
 ## What it does not do yet
 
 - **Claiming.** The `claim_token` row exists and is accepted; the claim itself
   is still Plexamp's own setup, which needs two answers in one session.
-- **Track metadata.** Title, artist, album and artwork live on the Plex Media
-  Server, not on the player's timeline. Position and duration do come through.
-- **Artwork and sample rate** are declared `false`, which is the honest answer
-  until the two above are done.
+- **Volume.** The plugin can set it, and the core does not yet route a plugin
+  renderer's volume to its bridges.
+- **Sample rate** is declared `false` deliberately: the timeline does not carry
+  one, and the server describes the file rather than what the DAC was handed.
 
 ## The one number that shaped it
 

@@ -24,7 +24,12 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
+# **read-only, not `yes`.** The Plex token this plugin needs is the one Plexamp
+# already holds, in `~/.local/share/Plexamp/Settings` - asking the user for a
+# second copy would be a second thing to go stale. `ProtectHome=yes` hides that
+# directory, and the symptom is a plugin that reports "the player has not been
+# claimed" about a player that plainly has been.
+ProtectHome=read-only
 PrivateTmp=yes
 
 [Install]
