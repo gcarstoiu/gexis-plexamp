@@ -237,3 +237,14 @@ async def test_our_own_write_is_not_read_back_as_somebody_turning_the_knob():
     assert plugin.player.calls == [("set_volume", (42,))]
     await plugin._volume_is(42)
     assert plugin.core.events == []
+
+
+@pytest.mark.parametrize("mode, plex", [("off", "0"), ("one", "1"), ("all", "2")])
+@pytest.mark.asyncio
+async def test_repeat_goes_back_the_way_it_came(mode, plex):
+    """The inverse of what `_metadata` does. Getting this backwards would set
+    repeat-one when the panel asked for repeat-all, and the panel would then
+    draw what Plexamp reported - so it would look *correct* and be wrong."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin.command("transport", {"command": "repeat", "argument": mode})
+    assert plugin.player.calls == [("set_repeat", (plex,))]

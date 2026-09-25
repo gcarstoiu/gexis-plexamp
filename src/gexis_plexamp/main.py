@@ -40,6 +40,7 @@ RELEASE_LADDER = {"polite_grace": 16.0, "sigterm_grace": 3.0, "sigkill_grace": 2
 #: Plex's repeat numbers to the contract's words. `1` is one track, `2` is the
 #: whole queue - which is the opposite order to how most people would guess.
 REPEAT = {"0": "off", "1": "one", "2": "all"}
+TO_PLEX_REPEAT = {word: number for number, word in REPEAT.items()}
 
 CAPABILITIES = {
     "audio_connection": "output",
@@ -94,6 +95,10 @@ class Plugin:
             # acquisition, and it is not a base slot that must keep running.
             return True
         if t == "activate":
+            # ADR-0027: a deliberate acquisition, asked for from the panel. For
+            # this renderer that is "start playing what you have", which is the
+            # same verb as play - Plexamp has no separate notion of being
+            # selected without playing.
             self.player.play_pause()
             return True
         if t == "transport":
@@ -112,6 +117,11 @@ class Plugin:
         raise ValueError(f"{t} is not something this plugin does")
 
     def _transport(self, command: str, argument):
+        # **`play` and `pause` are the same verb here**, and that is Plexamp's
+        # doing: its API offers `playPause` and nothing one-directional. The
+        # core only ever sends the one that makes sense for the current state -
+        # the panel's button knows which it is drawing - so a toggle is right
+        # rather than merely convenient.
         actions = {
             "play": self.player.play_pause,
             "pause": self.player.play_pause,
@@ -125,7 +135,9 @@ class Plugin:
             self.player.set_shuffle(bool(argument))
             return True
         if command == "repeat":
-            self.player.set_repeat(str(argument if argument is not None else 0))
+            # The contract's word back into Plex's number, the inverse of what
+            # `_metadata` does. `1` is one track, not all of them.
+            self.player.set_repeat(TO_PLEX_REPEAT.get(str(argument), "0"))
             return True
         raise ValueError(f"{command!r} is not a transport command this renderer has")
 
