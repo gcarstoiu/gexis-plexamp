@@ -1,0 +1,31 @@
+[Unit]
+Description=Plexamp as a Gexis plugin
+Documentation=https://github.com/gcarstoiu/gexis-plexamp
+# **Bound to the player, not to the core.** The manifest names
+# `plexamp.service` as the unit that opens the audio device, because that is
+# what the release ladder escalates against - so the one switch in the Plugins
+# category enables that unit, and this one follows it. `PartOf` means stopping
+# the player stops this too; `After` means we start once it is up.
+PartOf=plexamp.service
+After=plexamp.service gexis-core.service
+
+[Service]
+Type=simple
+# The settings the core holds for us (ADR-0088). `-` so a device that has typed
+# nothing in still starts: the plugin needs no configuration to be a renderer,
+# only to claim the player.
+EnvironmentFile=-/run/gexis/plugins/plexamp.env
+ExecStart=/usr/bin/python3 -m gexis_plexamp.main
+Environment=PYTHONPATH=/opt/gexis-plexamp/src
+# The socket's permissions are the access model (ADR-0084), and `gexis` is the
+# group that may open it. Nothing here needs root.
+User=pi
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=plexamp.service

@@ -1,0 +1,22 @@
+{
+  "id": "plexamp",
+  "name": "Plexamp",
+  "kind": "renderer",
+  "unit": "plexamp.service",
+  "label": "Plexamp Active",
+  "accent": "#e5a00d",
+  "status": "Ready",
+  "settings": [
+    {
+      "key": "claim_token",
+      "type": "text",
+      "label": "Claim token",
+      "marks": "N",
+      "note": "A Plex claim token from plex.tv/claim, pasted once. It is consumed when the player is claimed, so this value is dead afterwards. The player's name comes from the device name, not from here.",
+      "secret": true,
+      "placeholder": "claim-...",
+      "default": null,
+      "env": "PLEX_CLAIM_TOKEN"
+    }
+  ]
+}

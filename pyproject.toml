@@ -1,0 +1,15 @@
+[project]
+name = "gexis-plexamp"
+version = "0.1.0"
+description = "Plexamp as a Gexis Player plugin"
+requires-python = ">=3.11"
+# **No runtime dependencies, deliberately.** A plugin that ships in an
+# appliance image and needs a virtualenv to poll one HTTP endpoint is a plugin
+# that breaks on an upgrade nobody was watching.
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest==8.3.4", "pytest-asyncio==0.25.2"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
