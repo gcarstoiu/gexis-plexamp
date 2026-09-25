@@ -70,6 +70,20 @@ PYTHONPATH=src python3 -m gexis_plexamp.main --verbose
 `--socket` and `--plexamp` override the defaults
 (`/run/gexis/plugins.sock`, `http://127.0.0.1:32500`).
 
+## The mark
+
+`mark.png` is Plexamp's own icon, taken from the 48×48 frame of the favicon
+`plexamp.com` serves and keyed off the dark plate it is drawn on — the Gexis
+panel composites marks over its own background, and both built-in marks are
+fully transparent. George approved using it: *"You can use their logo for
+plexamp."*
+
+**48px is the whole of the resolution that exists.** The headless build ships
+only a 32×32 favicon and plexamp.com only a 48×48; there is no larger asset to
+find. The panel draws a mark at 32px on Now Playing and 38px on the mini strip,
+so that is comfortable, and at **68px** on the waiting screen in its full
+layout, where it is being stretched about 1.4×.
+
 ## Installing it
 
 It ships in the Gexis image, pinned by checksum, the way the Beszel agent does.
