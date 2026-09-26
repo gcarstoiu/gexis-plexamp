@@ -151,9 +151,18 @@ def test_the_ladder_does_not_wait_out_the_measured_hold():
 
 def test_what_we_declare_is_what_we_implement():
     """A capability we cannot honour is worse than one we never claimed: the
-    panel would offer the control and the command would fail."""
+    panel would offer the control and the command would fail.
+
+    **It cuts both ways, and the other way cost more.** `activate` was handled
+    in `command()` from the first version and left out of this list until
+    2026-09-26, so the core refused `POST /renderer/plexamp/activate` with 409 -
+    correctly, on what it had been told. The consequence was that Plexamp could
+    not take the device from a renderer that was actually holding it, because
+    the only other path to an acquisition is playback starting, and playback
+    cannot start without the device.
+    """
     declared = set(hello()["capabilities"]["controls"])
-    assert declared == {"play", "pause", "next", "previous", "shuffle", "repeat"}
+    assert declared == {"play", "pause", "next", "previous", "shuffle", "repeat", "activate"}
 
 
 @pytest.mark.parametrize("value, steps, expected", [

@@ -90,7 +90,20 @@ CAPABILITIES = {
     "supports_sample_rate": False,
     "volume_managed": True,
     "volume_mechanism": "software_api",
-    "controls": ["play", "pause", "next", "previous", "shuffle", "repeat"],
+    # **`activate` was implemented from the first version and never declared**,
+    # so `POST /renderer/plexamp/activate` answered 409 - the core refusing to
+    # pretend, exactly as ADR-0020's rule intends. Phase 11 already found this
+    # asymmetry the other way round (four controls declared and not implemented,
+    # 502 on every button); this is the same mistake mirrored, and it mattered
+    # more: **without it Plexamp cannot take the device from a renderer that is
+    # actually holding it.** Plexamp has to open the ALSA device to start
+    # playing, and the plugin only reports an acquisition once playback has
+    # started, so a phone pressing play while Spotify holds the device gets
+    # `BASS: Couldn't start` and nothing ever asks the core to arbitrate.
+    # Declaring it gives the core the other order: acquire, release the holder,
+    # then tell this player to play. Found by George, 2026-09-26: *"Cannot
+    # takeover with plexamp. The plexamp mobile app fails to playback."*
+    "controls": ["play", "pause", "next", "previous", "shuffle", "repeat", "activate"],
 }
 
 
