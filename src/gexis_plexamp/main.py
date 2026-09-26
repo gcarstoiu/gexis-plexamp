@@ -52,19 +52,20 @@ POLL_S = 1.0
 #: else had taken the device - and the takeover cost fourteen seconds to be
 #: polite about eleven of them.
 #:
-#: **0.5 s is what Plexamp needs, not what the device needs.** The device will
-#: not free inside any plausible grace, so the only thing this buys is time for
-#: the player to finish its own bookkeeping before the core kills the unit -
-#: measured at 18 ms for the final timeline POST that saves the playback
-#: position, 89 ms including the analytics call. 0.5 s is ~25x the one that
-#: matters. After it, the core's SIGKILL frees the device in 169 ms
-#: (Finding 077) and `Restart=on-failure` brings Plexamp straight back, idle:
-#: answering again after 3.1 s, listed for a phone again after 9.1 s.
+#: **No polite grace at all** (ADR-0091, amended 2026-09-26). The device will
+#: not free inside any plausible grace, and 0.5 s of waiting for it is what lost
+#: a race with the *next* renderer: go-librespot opens the device 0.3-0.5 s
+#: after it announces a transfer and gives up at once if it is busy, and the
+#: phone is then left with a progress bar stuck at 0:00 (found by George,
+#: 2026-09-26). The 0.5 s bought Plexamp time to post the position it stopped
+#: at (18 ms) before the kill; that is the price of the change, and George
+#: chose it. The core's SIGKILL frees the device in 143-169 ms (Findings 077,
+#: 089) and `Restart=on-failure` brings Plexamp straight back, idle.
 #:
 #: The two rungs below are ceilings the core only reaches if something has gone
 #: wrong, and it polls them rather than sleeping through them, so their size
 #: costs nothing in the ordinary case.
-RELEASE_LADDER = {"polite_grace": 0.5, "sigterm_grace": 3.0, "sigkill_grace": 2.0}
+RELEASE_LADDER = {"polite_grace": 0.0, "sigterm_grace": 3.0, "sigkill_grace": 2.0}
 
 #: Plex's repeat numbers to the contract's words. `1` is one track, `2` is the
 #: whole queue - which is the opposite order to how most people would guess.
@@ -135,17 +136,29 @@ class Plugin:
         self._last: dict = {}
         self._sent_at = 0.0
         self._volume: int | None = None
+        #: The polite stop in flight, if any - held so it is not collected.
+        self._stopping: asyncio.Future | None = None
 
     # --- what the core asks of us ------------------------------------------
 
+    def _stop_quietly(self) -> None:
+        """`stop` for a player that is about to be killed: a failure is the
+        kill winning, not something to report as an error."""
+        try:
+            self.player.stop()
+        except PlexampGone as exc:
+            logger.info("plexamp did not answer the stop before it went: %s", exc)
+
     async def command(self, t: str, message: dict):
         if t == "release":
-            # The polite stop. True means Plexamp confirmed it, **not** that the
-            # device is free - the core checks that itself, and here the two are
-            # fourteen seconds apart. Since ADR-0091 nobody waits out those
-            # fourteen seconds: what this buys is the ~18 ms Plexamp needs to
-            # post the position it stopped at, before the kill lands.
-            self.player.stop()
+            # The polite stop, **sent and not waited for** (ADR-0091, amended
+            # 2026-09-26). The core does not escalate until this answers, and
+            # Plexamp took 0.16-0.34 s to answer the stop - on its own long
+            # enough to lose the race with go-librespot's device open, before
+            # any grace was counted. The device is not freed by it anyway (it
+            # stays held for fourteen seconds); it is sent so Plexamp stops the
+            # audio and posts its position if it gets there before the kill.
+            self._stopping = asyncio.ensure_future(asyncio.to_thread(self._stop_quietly))
             return True
         if t == "signal_stop":
             # The core also has our unit and will act on it regardless. Nothing

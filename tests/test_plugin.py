@@ -82,7 +82,44 @@ async def test_an_acquisition_is_reported_once_not_every_poll():
 async def test_release_is_the_polite_stop():
     plugin = Plugin(FakeCore(), FakePlayer())
     assert await plugin.command("release", {}) is True
+    await plugin._stopping
     assert plugin.player.calls == [("stop", ())]
+
+
+@pytest.mark.asyncio
+async def test_release_answers_before_plexamp_does():
+    """**ADR-0091 as amended 2026-09-26.** Plexamp took 0.16-0.34 s to answer
+    the stop, and the core does not escalate until `release` answers - so a
+    release that waited for it lost the race with go-librespot's device open
+    on its own, and the phone was left with a progress bar stuck at 0:00."""
+    import threading
+
+    gate = threading.Event()
+
+    class SlowPlayer(FakePlayer):
+        def stop(self):
+            gate.wait(2)
+            self.calls.append(("stop", ()))
+
+    plugin = Plugin(FakeCore(), SlowPlayer())
+    assert await asyncio.wait_for(plugin.command("release", {}), 0.1) is True
+    assert plugin.player.calls == []
+    gate.set()
+    await plugin._stopping
+    assert plugin.player.calls == [("stop", ())]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_the_kill_beat_is_not_an_error():
+    from gexis_plexamp.plexamp import PlexampGone
+
+    class GonePlayer(FakePlayer):
+        def stop(self):
+            raise PlexampGone("connection refused")
+
+    plugin = Plugin(FakeCore(), GonePlayer())
+    assert await plugin.command("release", {}) is True
+    await plugin._stopping
 
 
 @pytest.mark.asyncio
@@ -263,9 +300,17 @@ def test_the_ladder_does_not_wait_out_the_measured_hold():
 
     A band rather than the exact number: the floor is Plexamp's own bookkeeping
     with room to spare, and the ceiling is *"well under the hold"*, which is the
-    whole point of the change.
+    whole point of the change. The floor went with the amendment below.
     """
-    assert 0.2 <= RELEASE_LADDER["polite_grace"] <= 2.0
+    assert RELEASE_LADDER["polite_grace"] <= 2.0
+
+
+def test_the_ladder_does_not_wait_at_all():
+    """**ADR-0091 as amended 2026-09-26**, George: *"A"*. The band above was
+    0.2-2.0 s, and 0.5 s of it lost the race with go-librespot, which opens the
+    device 0.3-0.5 s after a transfer and does not retry. The kill frees the
+    device in ~150 ms, so there is no grace that both helps Plexamp and wins."""
+    assert RELEASE_LADDER["polite_grace"] == 0.0
 
 
 def test_what_we_declare_is_what_we_implement():
