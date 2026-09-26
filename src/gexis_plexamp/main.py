@@ -20,7 +20,7 @@ import time
 
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
-from gexis_plexamp.server import Library
+from gexis_plexamp.server import Library, token as server_token
 
 logger = logging.getLogger("gexis_plexamp")
 
@@ -125,6 +125,13 @@ class Plugin:
         self.library = library if library is not None else Library()
         self._active = False
         self._available = False
+        #: **The play queue we have already treated as an acquisition**
+        #: (ADR-0092). `None` until a controller points this player at
+        #: something.
+        self._queue: str | None = None
+        #: The `playMedia` we owe, when a controller asked for one and the ALSA
+        #: device was held by somebody else. Re-issued on `device_freed`.
+        self._pending: dict | None = None
         self._last: dict = {}
         self._sent_at = 0.0
         self._volume: int | None = None
@@ -145,14 +152,24 @@ class Plugin:
             # useful to add: a stop is the strongest thing the API offers, and
             # `release` above has already sent it.
             return True
-        if t in ("device_freed", "restart_after_release"):
-            # `device_freed` does not apply: this renderer does not retry its
-            # own acquisition.
-            #
-            # `restart_after_release` **is** reached now, every takeover, and
-            # answering it with a no-op is deliberate (ADR-0091 §3). By the time
-            # it arrives this process is already gone - `PartOf=plexamp.service`
-            # follows the player down - so there is nothing here to answer with.
+        if t == "device_freed":
+            # **The retry ADR-0092 needs, on the hook that already existed for
+            # it.** `device_freed` is the core saying the outgoing renderer has
+            # let go, and its whole purpose is to *"give the incoming renderer a
+            # chance to retry its own acquisition"* (ADR-0089, Finding 014).
+            # This answered it with a no-op until 2026-09-26, because nothing
+            # here retried anything.
+            pending, self._pending = self._pending, None
+            if pending is None:
+                return True
+            logger.info("the device is free; playing what was refused")
+            self.player.play_media(**pending)
+            return True
+        if t == "restart_after_release":
+            # **Reached every takeover since ADR-0091, and answering it with a
+            # no-op is deliberate** (ADR-0091 section 3). By the time it arrives
+            # this process is already gone - `PartOf=plexamp.service` follows
+            # the player down - so there is nothing here to answer with.
             # The way back is `Restart=on-failure`, which the core's SIGKILL
             # triggers and a SIGTERM would not. **Not an oversight and not a
             # thing to "fix" by restarting the unit from here**: that was tried
@@ -163,10 +180,15 @@ class Plugin:
             return True
         if t == "activate":
             # ADR-0027: a deliberate acquisition, asked for from the panel. For
-            # this renderer that is "start playing what you have", which is the
-            # same verb as play - Plexamp has no separate notion of being
-            # selected without playing.
-            self.player.play_pause()
+            # this renderer that is "start playing what you have" - Plexamp has
+            # no separate notion of being selected without playing.
+            #
+            # **An explicit play, not `play_pause`.** This called the toggle
+            # until 2026-09-26, which would have *paused* a player that was
+            # already going. It was unreachable while `activate` was undeclared
+            # and the core answered 409; declaring it (ADR-0092) made it
+            # reachable, so it is fixed in the same breath.
+            self.player.play()
             return True
         if t == "transport":
             return self._transport(message.get("command"), message.get("argument"))
@@ -246,7 +268,15 @@ class Plugin:
             self._available = available
             await self.core.event("available", available=available)
 
+    #: The states that mean a controller just did something. **`stopped` is not
+    #: one of them**: Plexamp persists a play queue across restarts, so a clean
+    #: start can surface a `playQueueID` with nothing happening, and taking that
+    #: for an acquisition would move the panel's active renderer because a
+    #: process started (ADR-0092 section 4).
+    INTENT = frozenset({"playing", "buffering", "paused", "error"})
+
     async def _edges(self, timeline) -> None:
+        await self._queue_is(timeline)
         if timeline.playing and not self._active:
             self._active = True
             await self.core.event("acquire")
@@ -256,6 +286,53 @@ class Plugin:
             # same distinction ADR-0010 draws for everyone else.
             self._active = False
             await self.core.event("release")
+
+    async def _queue_is(self, timeline) -> None:
+        """**A play queue we have not seen is an acquisition** (ADR-0092).
+
+        Until this existed, the only evidence of an acquisition was the timeline
+        turning `playing` - and Plexamp has to open the ALSA device to reach
+        that, so while another renderer held the device playback could not start,
+        nothing was reported, and the core was never asked to arbitrate. Plexamp
+        could not take the device from a renderer that was holding it at all
+        (Finding 090).
+
+        A controller choosing something to play is the same deliberate act one
+        step earlier, and it is visible either way: on success the timeline says
+        `playing` with a queue, and on refusal it says `error` with the same
+        queue and everything needed to ask again.
+        """
+        queue = timeline.queue
+        if queue is None or queue == self._queue or timeline.state not in self.INTENT:
+            return
+        self._queue = queue
+        if timeline.state != "error":
+            # It is playing, or about to. The existing edge below reports the
+            # acquisition; there is nothing to retry and nothing to add.
+            return
+        if not (timeline.key and timeline.container and timeline.machine
+                and timeline.address):
+            # Refused, but the timeline did not carry enough to ask again. Say
+            # so rather than half-acting: a takeover that frees the device for a
+            # renderer which then cannot play is worse than not trying.
+            logger.info("plexamp refused a play and the timeline was too thin to retry")
+            return
+        self._pending = {
+            "key": timeline.key,
+            "container": timeline.container,
+            "machine": timeline.machine,
+            "address": timeline.address,
+            "port": timeline.port,
+            "token": server_token(),
+        }
+        logger.info(
+            "plexamp was asked for play queue %s and could not start - asking for the device",
+            queue,
+        )
+        # Not `self._active = True`: the acquisition is not real until the core
+        # says the device is ours, and `device_freed` is how it says so. The
+        # `playing` edge below sets it when audio actually starts.
+        await self.core.event("acquire")
 
     async def _volume_is(self, level) -> None:
         """Plexamp's own level, when it changes.

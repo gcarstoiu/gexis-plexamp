@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from xml.etree import ElementTree
 
@@ -43,7 +44,7 @@ class Timeline:
 
     __slots__ = ("state", "time_ms", "duration_ms", "volume", "shuffle",
                  "repeat", "controllable", "key", "rating_key",
-                 "address", "port", "machine")
+                 "address", "port", "machine", "queue", "container")
 
     def __init__(self, attrib: dict) -> None:
         self.state = attrib.get("state", "stopped")
@@ -64,6 +65,18 @@ class Timeline:
         self.address = unwrap(attrib.get("address"))
         self.port = _int(attrib.get("port")) or 32400
         self.machine = attrib.get("machineIdentifier")
+        #: **The play queue a controller pointed this player at** (ADR-0092).
+        #: `playQueueID` changes when somebody chooses something to play and
+        #: stays put as the queue advances - a new track moves
+        #: `playQueueItemID` and leaves this alone - which is what makes it
+        #: usable as "a controller just did something deliberate".
+        #:
+        #: It is present on a *refused* play too, which is the whole point:
+        #: when another renderer holds the ALSA device, Plexamp reports
+        #: `state="error"` carrying this and the two fields below, and that is
+        #: the only notice anything gets (Finding 090).
+        self.queue = attrib.get("playQueueID")
+        self.container = attrib.get("containerKey")
 
     @property
     def playing(self) -> bool:
@@ -176,6 +189,46 @@ class Plexamp:
 
     def play_pause(self) -> None:
         self._get("/player/playback/playPause")
+
+    def play(self) -> None:
+        """Play, rather than toggle. **Not the same as `play_pause`**: on a
+        player that is already going, the toggle pauses it.
+
+        Measured (Finding 090): on a player whose queue went with a failed play
+        this answers 200 and starts nothing, so it is not a way to recover a
+        refused play - `play_media` is. It is the right verb for *"start what you
+        already have"*, which is what `activate` means."""
+        self._get("/player/playback/play")
+
+    def play_media(self, *, key, container, machine, address, port, token=None,
+                   offset: int = 0) -> None:
+        """Play a queue the player was already asked for and could not start.
+
+        **ADR-0092.** A refused play leaves nothing behind to resume: measured,
+        `/player/playback/play` afterwards answers 200 and plays nothing,
+        because the queue went with the error (Finding 090). So the retry has to
+        be the original request again, and every argument it needs was on the
+        timeline that reported the failure.
+
+        **`http`, not the `https` the timeline reports.** The timeline names the
+        server as a `plex.direct` hostname with a certificate Plex owns;
+        `unwrap` has already reduced that to the bare LAN address it encodes, and
+        a bare address cannot satisfy that certificate. Plain HTTP on the LAN is
+        also what a phone's own `playMedia` uses - measured in the player's log
+        before this was written.
+        """
+        params = {
+            "key": key,
+            "containerKey": container,
+            "offset": int(offset),
+            "machineIdentifier": machine,
+            "address": address,
+            "port": str(port),
+            "protocol": "http",
+        }
+        if token:
+            params["token"] = token
+        self._get("/player/playback/playMedia?" + urllib.parse.urlencode(params))
 
     def next_track(self) -> None:
         self._get("/player/playback/skipNext")

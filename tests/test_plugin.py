@@ -25,10 +25,15 @@ class FakeCore:
 class FakePlayer:
     def __init__(self):
         self.calls = []
+        #: `play_media` is called with keywords only, and what it is called
+        #: *with* is the point of the test - `calls` keeps positional args.
+        self.kwargs = {}
 
     def __getattr__(self, name):
-        def record(*args):
+        def record(*args, **kw):
             self.calls.append((name, args))
+            if kw:
+                self.kwargs[name] = kw
         return record
 
 
@@ -128,6 +133,120 @@ async def test_metadata_is_sent_when_it_changes_and_not_otherwise():
     await plugin._metadata(_timeline("paused", time="2000", duration="200000"))
     assert len(plugin.core.events) == 2
     assert plugin.core.events[-1][1]["metadata"]["position"] == 2
+
+
+# --- ADR-0092: a play queue this renderer has not seen is an acquisition ------
+
+
+#: What a refused play actually looks like, measured (Finding 090): the queue and
+#: everything needed to ask again, carried on a `state="error"` timeline that is
+#: visible for about 50 ms.
+REFUSED = {
+    "playQueueID": "2930",
+    "playQueueItemID": "102681",
+    "containerKey": "/playQueues/2930",
+    "key": "/library/metadata/91795",
+    "ratingKey": "91795",
+    "machineIdentifier": "4548551a2f521a12907f1203a51db803817126ca",
+    "address": "192-168-178-191.2c3e144c614f4cdd8b4927f9d93ab4e2.plex.direct",
+    "port": "32400",
+    "protocol": "https",
+}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_play_asks_for_the_device():
+    """**The defect this fixes, in one test.** Plexamp has to open the ALSA
+    device to start playing, so while another renderer holds it playback cannot
+    begin - and the acquisition used to be reported *from* playback beginning.
+    Nothing was ever asked of the core and Plexamp could not take the device from
+    a renderer that held it at all."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._edges(_timeline("error", **REFUSED))
+    assert [t for t, _ in plugin.core.events] == ["acquire"]
+
+
+@pytest.mark.asyncio
+async def test_the_refused_play_is_issued_again_once_the_device_is_free():
+    """`device_freed` is the core saying the outgoing renderer let go, and it
+    exists for exactly this. A plain play will not do: the queue went with the
+    error, measured, so the original request has to be made again."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._edges(_timeline("error", **REFUSED))
+    assert await plugin.command("device_freed", {}) is True
+    called = [c for c in plugin.player.calls if c[0] == "play_media"]
+    assert len(called) == 1
+    sent = plugin.player.kwargs["play_media"]
+    assert sent["key"] == "/library/metadata/91795"
+    assert sent["container"] == "/playQueues/2930"
+    assert sent["machine"] == "4548551a2f521a12907f1203a51db803817126ca"
+    # **Unwrapped.** The timeline names the server as a plex.direct hostname
+    # whose certificate a bare address cannot satisfy.
+    assert sent["address"] == "192.168.178.191"
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_owed_when_the_play_worked():
+    """A queue that played needs no retry - and `device_freed` must not issue a
+    second play over the top of one already running."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._edges(_timeline("playing", **REFUSED))
+    assert [t for t, _ in plugin.core.events] == ["acquire"]
+    await plugin.command("device_freed", {})
+    assert [c[0] for c in plugin.player.calls] == []
+
+
+@pytest.mark.asyncio
+async def test_a_persisted_queue_on_a_stopped_player_is_not_an_acquisition():
+    """**ADR-0092 section 4.** Plexamp persists a play queue across restarts, so
+    a clean start can surface a `playQueueID` with nothing happening. Taking that
+    for an acquisition would move the panel's active renderer because a process
+    started."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._edges(_timeline("stopped", **REFUSED))
+    assert plugin.core.events == []
+
+
+@pytest.mark.asyncio
+async def test_the_same_queue_is_asked_for_once():
+    """The refused timeline can be seen more than once - the long poll answers
+    with the state it had when it woke - and a takeover per poll would be a
+    takeover storm."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    for _ in range(5):
+        await plugin._edges(_timeline("error", **REFUSED))
+    assert [t for t, _ in plugin.core.events] == ["acquire"]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_too_thin_to_retry_asks_for_nothing():
+    """Freeing the device for a renderer that then cannot play is worse than not
+    trying: the device ends up held by something silent."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    thin = {k: v for k, v in REFUSED.items() if k not in ("key", "containerKey")}
+    await plugin._edges(_timeline("error", **thin))
+    assert plugin.core.events == []
+    assert plugin._pending is None
+
+
+@pytest.mark.asyncio
+async def test_a_second_queue_after_the_first_is_a_fresh_acquisition():
+    """Somebody pressing play on something else is a new deliberate act."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._edges(_timeline("error", **REFUSED))
+    await plugin._edges(_timeline("error", **{**REFUSED, "playQueueID": "2931"}))
+    assert [t for t, _ in plugin.core.events] == ["acquire", "acquire"]
+
+
+@pytest.mark.asyncio
+async def test_activate_plays_rather_than_toggling():
+    """`activate` means *start what you have*. It called `play_pause` until
+    2026-09-26, which pauses a player that is already going - unreachable while
+    the control was undeclared and the core answered 409, reachable the moment it
+    was declared."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    assert await plugin.command("activate", {}) is True
+    assert [c[0] for c in plugin.player.calls] == ["play"]
 
 
 def test_the_ladder_does_not_wait_out_the_measured_hold():
