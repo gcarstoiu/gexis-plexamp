@@ -114,12 +114,18 @@ async def test_a_command_this_renderer_does_not_have_is_an_error_not_a_lie():
 @pytest.mark.asyncio
 async def test_metadata_is_sent_when_it_changes_and_not_otherwise():
     """A metadata line per second per renderer is a redraw per second for
-    nothing."""
+    nothing.
+
+    **Amended 2026-09-26**: this used to assert that a moved *position* was
+    itself worth sending. That is exactly the behaviour measured at twenty
+    times LMS's traffic, which made the Now Playing artist tab jump once a
+    second. A position on its own is no longer news.
+    """
     plugin = Plugin(FakeCore(), FakePlayer())
     await plugin._metadata(_timeline("playing", time="1000", duration="200000"))
     await plugin._metadata(_timeline("playing", time="1000", duration="200000"))
     assert len(plugin.core.events) == 1
-    await plugin._metadata(_timeline("playing", time="2000", duration="200000"))
+    await plugin._metadata(_timeline("paused", time="2000", duration="200000"))
     assert len(plugin.core.events) == 2
     assert plugin.core.events[-1][1]["metadata"]["position"] == 2
 
@@ -248,3 +254,45 @@ async def test_repeat_goes_back_the_way_it_came(mode, plex):
     plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
     await plugin.command("transport", {"command": "repeat", "argument": mode})
     assert plugin.player.calls == [("set_repeat", (plex,))]
+
+
+# --- how often the core hears about a track ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_position_alone_is_not_news():
+    """**Measured 2026-09-26:** sending on every poll put 1.1 state pushes a
+    second on the wire against LMS's 0.1 - twenty times the traffic - and the
+    panel re-rendered with each one. The Now Playing artist tab blanked its
+    genre pills and put them back once a second."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    for second in range(6):
+        await plugin._metadata(_timeline("playing", time=str(second * 1000), duration="200000"))
+    assert len(plugin.core.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_anything_but_position_is_news():
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin._metadata(_timeline("playing", time="1000", duration="200000"))
+    await plugin._metadata(_timeline("paused", time="2000", duration="200000"))
+    await plugin._metadata(_timeline("paused", time="3000", duration="200000", repeat="2"))
+    assert [e[1]["metadata"]["transport"] for e in plugin.core.events] == \
+        ["playing", "paused", "paused"]
+
+
+@pytest.mark.asyncio
+async def test_it_re_anchors_eventually(monkeypatch):
+    """The panel interpolates the playhead between reports, so it needs an
+    anchor now and then - it cannot drift forever."""
+    import gexis_plexamp.main as module
+
+    clock = [1000.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin._metadata(_timeline("playing", time="1000"))
+    await plugin._metadata(_timeline("playing", time="2000"))
+    assert len(plugin.core.events) == 1
+    clock[0] += module.ANCHOR_S + 1
+    await plugin._metadata(_timeline("playing", time="3000"))
+    assert len(plugin.core.events) == 2

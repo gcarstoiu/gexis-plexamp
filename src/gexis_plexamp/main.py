@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import logging
 import os
+import time
 
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
@@ -39,6 +40,15 @@ RELEASE_LADDER = {"polite_grace": 16.0, "sigterm_grace": 3.0, "sigkill_grace": 2
 
 #: Plex's repeat numbers to the contract's words. `1` is one track, `2` is the
 #: whole queue - which is the opposite order to how most people would guess.
+#: Fields that change on their own as a track plays, and mean nothing by
+#: themselves. A change in any *other* field is news worth a push.
+POSITION_ONLY = frozenset({"position"})
+
+#: How often to re-send anyway, so the panel's interpolated playhead cannot
+#: drift indefinitely from the player's own idea of the position. Generous:
+#: LMS gets by on roughly one report in twenty seconds.
+ANCHOR_S = 10.0
+
 REPEAT = {"0": "off", "1": "one", "2": "all"}
 TO_PLEX_REPEAT = {word: number for number, word in REPEAT.items()}
 
@@ -75,6 +85,7 @@ class Plugin:
         self._active = False
         self._available = False
         self._last: dict = {}
+        self._sent_at = 0.0
         self._volume: int | None = None
 
     # --- what the core asks of us ------------------------------------------
@@ -217,11 +228,21 @@ class Plugin:
             # track, not per poll - see `server.Library`.
             **self.library.for_track(timeline),
         }
-        # Only when something changed. The core publishes every event to every
-        # panel, and a metadata line per second per renderer is a redraw per
-        # second for nothing.
-        if metadata != self._last:
+        # **Position alone is not news** (2026-09-26). Everything else about the
+        # track is unchanged while it plays, so sending on every poll meant a
+        # state push every second - measured at **1.1/s against LMS's 0.1/s**,
+        # twenty times the traffic, and the whole panel re-rendering with it.
+        # It was visible: the Now Playing artist tab blanked its genre pills and
+        # put them back once a second, moving everything below them.
+        #
+        # The panel interpolates the playhead between reports (it has to: LMS
+        # barely reports one), so what it needs is an *anchor*, not a tick.
+        moved = {k: v for k, v in metadata.items() if k not in POSITION_ONLY}
+        anchored = {k: v for k, v in self._last.items() if k not in POSITION_ONLY}
+        stale = time.monotonic() - self._sent_at > ANCHOR_S
+        if moved != anchored or stale:
             self._last = metadata
+            self._sent_at = time.monotonic()
             await self.core.event("metadata", metadata=metadata)
 
 
