@@ -34,12 +34,37 @@ ID = "plexamp"
 #: it started playing something."*
 POLL_S = 1.0
 
-#: **The ladder Finding 077 forces.** A commanded stop confirms at once and the
-#: ALSA device stays held for a deterministic **14 s** - compiled into
-#: Plexamp's native layer, not a setting, and seven settings changed by hand
-#: did not move it. A polite grace under that would escalate to SIGTERM against
-#: a renderer that was going to let go on its own.
-RELEASE_LADDER = {"polite_grace": 16.0, "sigterm_grace": 3.0, "sigkill_grace": 2.0}
+#: **The ladder, narrowed on purpose** (ADR-0091, George: *"Decision 1"*).
+#:
+#: A commanded stop confirms at once and the ALSA device stays held for a
+#: deterministic **14 s** - compiled into Plexamp's native layer, not a setting.
+#: Finding 088 decomposed it: the audio stops in 0 ms, output is suspended at
+#: +3 s, and the open PCM sits in `SETUP` for a further ~11 s. Squeezelite does
+#: the same thing and `squeezelite.service` configures it away with `-C 1`;
+#: Plexamp exposes no equivalent, and every runtime lever was measured and
+#: rejected - `audioDeviceUuid` re-initialises BASS and plays on,
+#: `setSinksForSource` needs a mesh, `remoteControl` is not settable over HTTP.
+#:
+#: **This declared 16 s so the ladder would never escalate**, on the reasoning
+#: that a renderer about to let go on its own should not be shot. That was wrong
+#: about the cost: waiting means the player is left running, registered and
+#: claimed, so George's phone went on showing it as connected after something
+#: else had taken the device - and the takeover cost fourteen seconds to be
+#: polite about eleven of them.
+#:
+#: **0.5 s is what Plexamp needs, not what the device needs.** The device will
+#: not free inside any plausible grace, so the only thing this buys is time for
+#: the player to finish its own bookkeeping before the core kills the unit -
+#: measured at 18 ms for the final timeline POST that saves the playback
+#: position, 89 ms including the analytics call. 0.5 s is ~25x the one that
+#: matters. After it, the core's SIGKILL frees the device in 169 ms
+#: (Finding 077) and `Restart=on-failure` brings Plexamp straight back, idle:
+#: answering again after 3.1 s, listed for a phone again after 9.1 s.
+#:
+#: The two rungs below are ceilings the core only reaches if something has gone
+#: wrong, and it polls them rather than sleeping through them, so their size
+#: costs nothing in the ordinary case.
+RELEASE_LADDER = {"polite_grace": 0.5, "sigterm_grace": 3.0, "sigkill_grace": 2.0}
 
 #: Plex's repeat numbers to the contract's words. `1` is one track, `2` is the
 #: whole queue - which is the opposite order to how most people would guess.
@@ -97,16 +122,31 @@ class Plugin:
         if t == "release":
             # The polite stop. True means Plexamp confirmed it, **not** that the
             # device is free - the core checks that itself, and here the two are
-            # fourteen seconds apart.
+            # fourteen seconds apart. Since ADR-0091 nobody waits out those
+            # fourteen seconds: what this buys is the ~18 ms Plexamp needs to
+            # post the position it stopped at, before the kill lands.
             self.player.stop()
             return True
         if t == "signal_stop":
             # The core also has our unit and will act on it regardless. Nothing
-            # useful to add: a stop is the strongest thing the API offers.
+            # useful to add: a stop is the strongest thing the API offers, and
+            # `release` above has already sent it.
             return True
         if t in ("device_freed", "restart_after_release"):
-            # Neither race applies to this renderer: it does not retry its own
-            # acquisition, and it is not a base slot that must keep running.
+            # `device_freed` does not apply: this renderer does not retry its
+            # own acquisition.
+            #
+            # `restart_after_release` **is** reached now, every takeover, and
+            # answering it with a no-op is deliberate (ADR-0091 §3). By the time
+            # it arrives this process is already gone - `PartOf=plexamp.service`
+            # follows the player down - so there is nothing here to answer with.
+            # The way back is `Restart=on-failure`, which the core's SIGKILL
+            # triggers and a SIGTERM would not. **Not an oversight and not a
+            # thing to "fix" by restarting the unit from here**: that was tried
+            # for squeezelite twice and reverted within a day each time
+            # (Finding 013 §1), and it is only safe to leave alone because
+            # Plexamp opens the ALSA device when it plays rather than when it
+            # starts.
             return True
         if t == "activate":
             # ADR-0027: a deliberate acquisition, asked for from the panel. For

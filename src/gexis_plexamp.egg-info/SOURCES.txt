@@ -1,0 +1,15 @@
+LICENSE
+README.md
+pyproject.toml
+src/gexis_plexamp/__init__.py
+src/gexis_plexamp/contract.py
+src/gexis_plexamp/main.py
+src/gexis_plexamp/plexamp.py
+src/gexis_plexamp/server.py
+src/gexis_plexamp.egg-info/PKG-INFO
+src/gexis_plexamp.egg-info/SOURCES.txt
+src/gexis_plexamp.egg-info/dependency_links.txt
+src/gexis_plexamp.egg-info/requires.txt
+src/gexis_plexamp.egg-info/top_level.txt
+tests/test_plugin.py
+tests/test_server.py

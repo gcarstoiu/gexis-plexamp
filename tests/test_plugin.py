@@ -130,11 +130,23 @@ async def test_metadata_is_sent_when_it_changes_and_not_otherwise():
     assert plugin.core.events[-1][1]["metadata"]["position"] == 2
 
 
-def test_the_ladder_is_wider_than_the_measured_hold():
-    """**Finding 077**: a commanded stop confirms at once and the device stays
-    held for a deterministic 14 s. A polite grace under that escalates to
-    SIGTERM against a renderer that was going to let go by itself."""
-    assert RELEASE_LADDER["polite_grace"] > 14.0
+def test_the_ladder_does_not_wait_out_the_measured_hold():
+    """**Reversed by ADR-0091**, George: *"Decision 1."* This asserted
+    `polite_grace > 14.0` - wide enough that the ladder never escalated, so a
+    renderer about to let go on its own would not be shot.
+
+    What that cost, once it was measured: the player is left running,
+    registered and claimed for the whole fourteen seconds, so a phone goes on
+    showing it as connected after something else has taken the device
+    (Finding 088 §2). The grace now covers only what Plexamp itself needs -
+    ~18 ms to post the position it stopped at - and the core's SIGKILL frees the
+    device in 169 ms, with `Restart=on-failure` bringing the player back idle.
+
+    A band rather than the exact number: the floor is Plexamp's own bookkeeping
+    with room to spare, and the ceiling is *"well under the hold"*, which is the
+    whole point of the change.
+    """
+    assert 0.2 <= RELEASE_LADDER["polite_grace"] <= 2.0
 
 
 def test_what_we_declare_is_what_we_implement():

@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: gexis-plexamp
+Version: 0.1.0
+Summary: Plexamp as a Gexis Player plugin
+Requires-Python: >=3.11
+License-File: LICENSE
+Provides-Extra: test
+Requires-Dist: pytest==8.3.4; extra == "test"
+Requires-Dist: pytest-asyncio==0.25.2; extra == "test"
+Dynamic: license-file
