@@ -296,3 +296,42 @@ async def test_it_re_anchors_eventually(monkeypatch):
     clock[0] += module.ANCHOR_S + 1
     await plugin._metadata(_timeline("playing", time="3000"))
     assert len(plugin.core.events) == 2
+
+
+# --- how quickly an acquisition is noticed -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_watch_uses_the_long_poll_and_does_not_block_the_loop():
+    """**Measured on the device:** a `wait=1` poll opened 0.3s before a track
+    started returned **0.02s** after the change, not at its timeout. So the
+    watch waits *in* the poll rather than sleeping between polls, and the delay
+    between Plexamp starting and the core hearing about it stops being up to a
+    second.
+
+    It blocks, so it must not be called on the event loop - the socket to the
+    core has to keep being read while it waits.
+    """
+    import inspect
+
+    from gexis_plexamp.main import Plugin as _P
+
+    source = inspect.getsource(_P.watch)
+    # The blocking poll must not be on the event loop.
+    assert "to_thread(self.player.timeline, POLL_S)" in source
+    # And the loop must not *also* sleep a full interval after it - which is
+    # what the first version of this test got wrong: the only remaining
+    # `sleep(POLL_S)` is the retry after Plexamp stops answering, and that one
+    # belongs there.
+    after_poll = source.split("await self._metadata(timeline)")[-1]
+    assert "asyncio.sleep(POLL_S)" not in after_poll
+
+
+def test_the_timeline_takes_a_wait():
+    """`wait=0` is still the right call for a one-shot read; the watch asks for
+    a long one."""
+    import inspect
+
+    from gexis_plexamp.plexamp import Plexamp as _X
+
+    assert "wait" in inspect.signature(_X.timeline).parameters

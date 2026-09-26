@@ -26,9 +26,12 @@ logger = logging.getLogger("gexis_plexamp")
 
 ID = "plexamp"
 
-#: How often the timeline is asked. Plexamp's own `wait=0` poll is cheap and
-#: local; a second of latency on a takeover is the same order as the renderers
-#: that watch D-Bus.
+#: The long poll's ceiling, in seconds. `timeline(wait=N)` returns **early**
+#: when something changes - measured at 0.02 s after the event - so this is how
+#: long a quiet player waits before being asked again, not how late news
+#: arrives. It was a plain 1 s sleep until 2026-09-26, and George could see it:
+#: *"the panel changed from the waiting for renderer to now playing only when
+#: it started playing something."*
 POLL_S = 1.0
 
 #: **The ladder Finding 077 forces.** A commanded stop confirms at once and the
@@ -167,7 +170,9 @@ class Plugin:
         """Poll Plexamp and report the two edges plus what is playing."""
         while True:
             try:
-                timeline = self.player.timeline()
+                # **Off the event loop**: this blocks for up to POLL_S, and the
+                # socket to the core has to keep being read while it does.
+                timeline = await asyncio.to_thread(self.player.timeline, POLL_S)
             except PlexampGone as exc:
                 # Plexamp is a service that can restart. Unavailable is the
                 # honest published state; it is not our business to fix.
@@ -179,7 +184,9 @@ class Plugin:
             await self._edges(timeline)
             await self._volume_is(timeline.volume)
             await self._metadata(timeline)
-            await asyncio.sleep(POLL_S)
+            # No sleep: the long poll above is the pacing. A short yield anyway,
+            # so a player answering instantly cannot spin this into a hot loop.
+            await asyncio.sleep(0.05)
 
     async def _available_is(self, available: bool) -> None:
         if available != self._available:

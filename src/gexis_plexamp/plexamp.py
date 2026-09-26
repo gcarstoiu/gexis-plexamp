@@ -127,9 +127,26 @@ class Plexamp:
         except (urllib.error.URLError, OSError) as exc:
             raise PlexampGone(f"{url}: {exc}") from exc
 
-    def timeline(self) -> Timeline:
-        """The music timeline, now. `wait=0` so this never blocks on a change."""
-        body = self._get("/player/timeline/poll?wait=0")
+    def timeline(self, wait: int = 0) -> Timeline:
+        """The music timeline.
+
+        **`wait=1` is a long poll and it returns early**, which is the whole
+        reason to use it: measured on the device, a poll opened 0.3 s before a
+        track started returned **0.02 s** after the change fired, rather than
+        sitting out its second. So a watcher using it hears about an
+        acquisition almost at once instead of up to a poll interval later -
+        George noticed the difference: *"the panel changed from the waiting for
+        renderer to now playing only when it started playing something."*
+
+        **It answers with the state it had when it woke**, which for that
+        measurement was still `stopped`. That is not a problem for a loop: the
+        next poll returns the new state immediately. It is a problem for anyone
+        treating one answer as the truth at the moment it arrives.
+
+        **It blocks for up to `wait` seconds**, so a caller on an event loop has
+        to get it off the loop.
+        """
+        body = self._get(f"/player/timeline/poll?wait={int(wait)}")
         try:
             root = ElementTree.fromstring(body)
         except ElementTree.ParseError as exc:
