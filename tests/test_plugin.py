@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from gexis_plexamp.main import Plugin, RELEASE_LADDER, _scaled, _seconds, hello
+from gexis_plexamp.main import Plugin, RELEASE_LADDER, _seconds, hello
 from gexis_plexamp.plexamp import Timeline
 
 
@@ -329,13 +329,6 @@ def test_what_we_declare_is_what_we_implement():
     assert declared == {"play", "pause", "next", "previous", "shuffle", "repeat", "activate"}
 
 
-@pytest.mark.parametrize("value, steps, expected", [
-    (62, 100, 62), (50, 100, 50), (5, 10, 50), (0, 100, 0), (None, 100, 0),
-])
-def test_volume_scales_onto_plexamps_own_0_to_100(value, steps, expected):
-    assert _scaled(value, steps) == expected
-
-
 @pytest.mark.parametrize("ms, seconds", [(0, 0), (1000, 1), (1499, 1), (1500, 2), (None, None)])
 def test_positions_are_seconds(ms, seconds):
     assert _seconds(ms) == seconds
@@ -400,34 +393,18 @@ async def test_repeat_is_a_word_not_a_flag(plex, contract):
 # --- volume -----------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_the_players_own_level_is_reported_when_it_changes():
-    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
-    await plugin._volume_is(56)
-    await plugin._volume_is(56)
-    await plugin._volume_is(70)
-    assert [(t, f["value"]) for t, f in plugin.core.events] == [
-        ("volume", 56), ("volume", 70)]
+def test_the_hello_does_not_claim_volume():
+    """Gexis Finding 095: Plexamp's level is a gain of its own, and a level the
+    core also applied to the DAC was applied twice."""
+    assert hello()["capabilities"]["volume_managed"] is False
 
 
 @pytest.mark.asyncio
-async def test_no_level_at_all_is_not_a_report():
+async def test_a_level_from_the_core_is_refused():
     plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
-    await plugin._volume_is(None)
-    assert plugin.core.events == []
-
-
-@pytest.mark.asyncio
-async def test_our_own_write_is_not_read_back_as_somebody_turning_the_knob():
-    """**The echo every volume path in this project has had to deal with**
-    (Gexis Findings 045 and 047). The core sets the volume; a poll a moment
-    later reads that same number off the player; reporting it would be the
-    daemon told that the user changed something."""
-    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
-    await plugin.command("set_volume", {"value": 42, "steps": 100})
-    assert plugin.player.calls == [("set_volume", (42,))]
-    await plugin._volume_is(42)
-    assert plugin.core.events == []
+    with pytest.raises(ValueError):
+        await plugin.command("set_volume", {"value": 42, "steps": 100})
+    assert plugin.player.calls == []
 
 
 @pytest.mark.parametrize("mode, plex", [("off", "0"), ("one", "1"), ("all", "2")])

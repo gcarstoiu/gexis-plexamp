@@ -89,7 +89,13 @@ CAPABILITIES = {
     # server's answer describes the file, not what the DAC was handed.
     "supports_artwork": True,
     "supports_sample_rate": False,
-    "volume_managed": True,
+    # **Not managed by the core** (Gexis Finding 095; George, 2026-09-28,
+    # reversing his earlier "C"). Plexamp's level is a gain inside its own
+    # audio engine and has no full-scale mode, so a level reported to the core
+    # was applied twice - there, and again on the DAC. Now the Plexamp app's
+    # slider moves Plexamp's gain and the panel's moves the DAC's, as for
+    # Qobuz Connect.
+    "volume_managed": False,
     "volume_mechanism": "software_api",
     # **`activate` was implemented from the first version and never declared**,
     # so `POST /renderer/plexamp/activate` answered 409 - the core refusing to
@@ -135,7 +141,6 @@ class Plugin:
         self._pending: dict | None = None
         self._last: dict = {}
         self._sent_at = 0.0
-        self._volume: int | None = None
         #: The polite stop in flight, if any - held so it is not collected.
         self._stopping: asyncio.Future | None = None
 
@@ -206,14 +211,8 @@ class Plugin:
         if t == "transport":
             return self._transport(message.get("command"), message.get("argument"))
         if t == "set_volume":
-            level = _scaled(message.get("value"), message.get("steps"))
-            # Remembered before it is sent, so the poll that follows does not
-            # read our own write back and report it to the core as if somebody
-            # had turned the knob - the echo every volume path here has had to
-            # deal with (Findings 045 and 047).
-            self._volume = level
-            self.player.set_volume(level)
-            return True
+            # Not declared (volume_managed is false); refused honestly.
+            raise ValueError("the core does not manage this renderer's volume")
         if t == "setting":
             return self._setting(message.get("key"), message.get("value"))
         raise ValueError(f"{t} is not something this plugin does")
@@ -270,7 +269,6 @@ class Plugin:
                 continue
             await self._available_is(True)
             await self._edges(timeline)
-            await self._volume_is(timeline.volume)
             await self._metadata(timeline)
             # No sleep: the long poll above is the pacing. A short yield anyway,
             # so a player answering instantly cannot spin this into a hot loop.
@@ -347,22 +345,6 @@ class Plugin:
         # `playing` edge below sets it when audio actually starts.
         await self.core.event("acquire")
 
-    async def _volume_is(self, level) -> None:
-        """Plexamp's own level, when it changes.
-
-        **Only on a change**, and that matters more here than for metadata: the
-        core applies a reported level to the hardware mixer, so a report every
-        second would be a write to the DAC every second for a number that did
-        not move.
-        """
-        if level is None or level == self._volume:
-            return
-        self._volume = level
-        # Plexamp's scale is already 0-100, which is the scale the contract
-        # normalises to - so `steps` is not a conversion here, it is a
-        # statement of which scale the number is on.
-        await self.core.event("volume", value=int(level), steps=100)
-
     async def _metadata(self, timeline) -> None:
         metadata = {
             "position": _seconds(timeline.time_ms),
@@ -398,14 +380,6 @@ class Plugin:
 
 def _seconds(milliseconds):
     return None if milliseconds is None else round(milliseconds / 1000)
-
-
-def _scaled(value, steps):
-    """The core's scale to Plexamp's 0-100."""
-    if value is None:
-        return 0
-    steps = steps or 100
-    return round((int(value) / steps) * 100) if steps != 100 else int(value)
 
 
 async def run(socket_path: str, base: str) -> None:
