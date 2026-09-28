@@ -93,8 +93,7 @@ CAPABILITIES = {
     # reversing his earlier "C"). Plexamp's level is a gain inside its own
     # audio engine and has no full-scale mode, so a level reported to the core
     # was applied twice - there, and again on the DAC. Now the Plexamp app's
-    # slider moves Plexamp's gain and the panel's moves the DAC's, as for
-    # Qobuz Connect.
+    # slider moves Plexamp's gain and the panel's moves the DAC's.
     "volume_managed": False,
     "volume_mechanism": "software_api",
     # **`activate` was implemented from the first version and never declared**,
