@@ -17,7 +17,10 @@ the exercise that decides it.
   the audio device and when it **gives it up**. Playing is an acquisition;
   stopped is a release. **Paused is neither** — a paused renderer still holds
   the device and still means to.
-- Answers the core's commands: the polite release, transport, volume.
+- Answers the core's commands: the release, and transport.
+- **Leaves volume to Plexamp.** Plexamp's level is a gain inside its own audio
+  engine, with no full-scale mode, so the player does not manage it: the
+  Plexamp app's slider moves Plexamp's gain, the panel's moves the DAC.
 - Reports position, duration and transport state.
 
 ## Where the names come from
@@ -47,8 +50,6 @@ If you would rather it never published one, set `supports_artwork: false` in
 
 - **Claiming.** The `claim_token` row exists and is accepted; the claim itself
   is still Plexamp's own setup, which needs two answers in one session.
-- **Volume.** The plugin can set it, and the core does not yet route a plugin
-  renderer's volume to its bridges.
 - **Sample rate** is declared `false` deliberately: the timeline does not carry
   one, and the server describes the file rather than what the DAC was handed.
 
