@@ -12,11 +12,12 @@
       "type": "text",
       "label": "Claim token",
       "marks": "N",
-      "note": "A Plex claim token from plex.tv/claim, pasted once. It is consumed when the player is claimed, so this value is dead afterwards. The player's name comes from the device name, not from here.",
+      "note": "Claim token from https://plex.tv/claim",
       "secret": true,
       "placeholder": "claim-...",
       "default": null,
-      "env": "PLEX_CLAIM_TOKEN"
+      "env": "PLEXAMP_CLAIM_TOKEN",
+      "again": "Claim again"
     }
   ]
 }

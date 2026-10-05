@@ -22,6 +22,11 @@ the exercise that decides it.
   engine, with no full-scale mode, so the player does not manage it: the
   Plexamp app's slider moves Plexamp's gain, the panel's moves the DAC.
 - Reports position, duration and transport state.
+- **Says whether the player is claimed.** The claim is made by Gexis's
+  `plexamp-run` as Plexamp starts (Gexis ADR-0119): Plexamp claims itself from
+  `PLEXAMP_CLAIM_TOKEN`, named after the device. This plugin reads the result -
+  Plexamp's own token and `plexamp-run`'s `claim.json` - and reports it on the
+  *Claim token* row: *Claimed*, or *The claim did not work*.
 
 ## Where the names come from
 
@@ -48,8 +53,6 @@ If you would rather it never published one, set `supports_artwork: false` in
 
 ## What it does not do yet
 
-- **Claiming.** The `claim_token` row exists and is accepted; the claim itself
-  is still Plexamp's own setup, which needs two answers in one session.
 - **Sample rate** is declared `false` deliberately: the timeline does not carry
   one, and the server describes the file rather than what the DAC was handed.
 

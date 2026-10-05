@@ -18,6 +18,7 @@ import logging
 import os
 import time
 
+from gexis_plexamp import claim
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
 from gexis_plexamp.server import Library, token as server_token
@@ -142,6 +143,10 @@ class Plugin:
         self._sent_at = 0.0
         #: The polite stop in flight, if any - held so it is not collected.
         self._stopping: asyncio.Future | None = None
+        #: What the *Claim token* row was last said to be, so it is said once
+        #: per change (Gexis ADR-0119).
+        self._claim: dict | None = None
+        self._claim_status = claim.status
 
     # --- what the core asks of us ------------------------------------------
 
@@ -242,11 +247,10 @@ class Plugin:
         raise ValueError(f"{command!r} is not a transport command this renderer has")
 
     def _setting(self, key: str, value):
-        # `claim_token` is the only row this plugin has, and claiming is not
-        # implemented here yet - the token is consumed by Plexamp's own setup and
-        # doing it from here needs a session that survives two answers (Finding
-        # 077). Accepted and stored rather than refused, so the row works the
-        # moment the claim does.
+        # `claim_token` is the only row this plugin has, and the claim is not
+        # made here: the core restarts Plexamp when the token changes, and
+        # Gexis's `plexamp-run` hands it over as Plexamp starts (ADR-0119).
+        # This plugin reports how it went, from the files - see `_claim_is`.
         logger.info("setting %s changed", key)
         return True
 
@@ -255,6 +259,7 @@ class Plugin:
     async def watch(self) -> None:
         """Poll Plexamp and report the two edges plus what is playing."""
         while True:
+            await self._claim_is()
             try:
                 # **Off the event loop**: this blocks for up to POLL_S, and the
                 # socket to the core has to keep being read while it does.
@@ -272,6 +277,15 @@ class Plugin:
             # No sleep: the long poll above is the pacing. A short yield anyway,
             # so a player answering instantly cannot spin this into a hot loop.
             await asyncio.sleep(0.05)
+
+    async def _claim_is(self) -> None:
+        """Tell the core what the *Claim token* row is, when that changes
+        (Gexis ADR-0119): *Claimed*, or the claim that did not work. Two
+        small file reads a second, alongside the timeline's poll."""
+        now = self._claim_status()
+        if now != self._claim:
+            self._claim = now
+            await self.core.event("row", key="claim_token", **now)
 
     async def _available_is(self, available: bool) -> None:
         if available != self._available:
