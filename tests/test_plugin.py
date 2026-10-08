@@ -497,3 +497,16 @@ def test_the_timeline_takes_a_wait():
     from gexis_plexamp.plexamp import Plexamp as _X
 
     assert "wait" in inspect.signature(_X.timeline).parameters
+
+
+
+@pytest.mark.asyncio
+async def test_a_plexamp_that_never_answers_is_said_to_be_unavailable():
+    """The core counts a renderer available from the moment it connects, so
+    the first answer is sent whatever it is: a Plexamp that is missing or
+    never answers says so once, and the panel stops offering it."""
+    plugin = Plugin(FakeCore(), FakePlayer())
+    await plugin._available_is(False)
+    await plugin._available_is(False)
+    await plugin._available_is(True)
+    assert [f["available"] for t, f in plugin.core.events if t == "available"] == [False, True]

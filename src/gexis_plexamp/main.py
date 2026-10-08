@@ -131,7 +131,13 @@ class Plugin:
         self.player = player
         self.library = library if library is not None else Library()
         self._active = False
-        self._available = False
+        #: **Unknown until the first poll answers, so that answer is always
+        #: sent.** The core marks a renderer available when it connects; a
+        #: bridge that started at False and reported only changes never said
+        #: otherwise when Plexamp was not there at all, and the panel offered
+        #: a Plexamp whose download had failed (2026-10-08, a new card with
+        #: no network yet).
+        self._available: bool | None = None
         #: **The play queue we have already treated as an acquisition**
         #: (ADR-0092). `None` until a controller points this player at
         #: something.
