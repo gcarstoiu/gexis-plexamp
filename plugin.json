@@ -1,6 +1,7 @@
 {
   "id": "plexamp",
   "name": "Plexamp",
+  "summary": "Plays your Plex library through the player, with the Plexamp app on your phone as the remote.",
   "kind": "renderer",
   "unit": "plexamp.service",
   "label": "Plexamp Active",
