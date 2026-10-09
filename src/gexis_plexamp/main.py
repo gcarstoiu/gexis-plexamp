@@ -273,10 +273,16 @@ class Plugin:
             except PlexampGone as exc:
                 # Plexamp is a service that can restart. Unavailable is the
                 # honest published state; it is not our business to fix.
-                logger.info("plexamp is not answering: %s", exc)
+                # **Said once, not every poll** (ShelvesPi, 2026-10-09: about
+                # 3,600 lines an hour while Plexamp was not up). The change is
+                # logged; the next line is the one that says it answers again.
+                if self._available is not False:
+                    logger.info("plexamp is not answering: %s", exc)
                 await self._available_is(False)
                 await asyncio.sleep(POLL_S)
                 continue
+            if self._available is False:
+                logger.info("plexamp is answering again")
             await self._available_is(True)
             await self._edges(timeline)
             await self._metadata(timeline)

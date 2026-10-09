@@ -510,3 +510,44 @@ async def test_a_plexamp_that_never_answers_is_said_to_be_unavailable():
     await plugin._available_is(False)
     await plugin._available_is(True)
     assert [f["available"] for t, f in plugin.core.events if t == "available"] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_not_answering_is_logged_once_not_every_poll(caplog, monkeypatch):
+    """ShelvesPi, 2026-10-09: a Plexamp that never started logged this line
+    every second. Once when it stops answering, once when it is back."""
+    import logging
+    from gexis_plexamp.plexamp import PlexampGone
+
+    answers = [PlexampGone("refused")] * 3 + [_timeline("stopped")] + [PlexampGone("refused")]
+
+    class Flaky(FakePlayer):
+        def timeline(self, wait):
+            a = answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+
+    plugin = Plugin(FakeCore(), Flaky())
+    plugin._claim_is = lambda: _noop()
+    import gexis_plexamp.main as main_mod
+
+    async def fast_sleep(s):
+        if not answers:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(main_mod.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(main_mod.asyncio, "to_thread", lambda f, *a: _now(f(*a)))
+    caplog.set_level(logging.INFO, logger="gexis_plexamp")
+    with pytest.raises(asyncio.CancelledError):
+        await plugin.watch()
+    lines = [r.getMessage() for r in caplog.records]
+    assert sum("not answering" in l for l in lines) == 2
+    assert sum("answering again" in l for l in lines) == 1
+
+
+async def _noop():
+    return None
+
+
+async def _now(value):
+    return value
