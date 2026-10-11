@@ -442,29 +442,70 @@ async def test_a_variable_output_leaves_plexamp_s_level_alone():
     assert plugin.player.calls == []
 
 
+class Polled(FakePlayer):
+    """A Plexamp that records how long each poll was asked to wait, and fails
+    the polls named in `fail`."""
+
+    def __init__(self, fail=()):
+        super().__init__()
+        self.waits = []
+        self.fail = set(fail)
+
+    def timeline(self, wait):
+        from gexis_plexamp.plexamp import PlexampGone
+        self.waits.append(wait)
+        if len(self.waits) in self.fail:
+            raise PlexampGone("timed out")
+        return _timeline("playing", volume="40")
+
+
+async def _watch_for(plugin, seconds):
+    task = asyncio.ensure_future(plugin.watch())
+    await asyncio.sleep(seconds)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.asyncio
-async def test_while_fixed_the_level_is_looked_at_often_and_no_longer_after(monkeypatch):
-    """George: "Can we make it faster than 1 second?" - the long poll did not
-    always wake for a volume change; while Fixed the level is asked for on
-    its own, every FIXED_POLL_S, and not once the output is variable."""
+async def test_while_fixed_the_one_loop_asks_without_waiting_and_no_second_poller_runs(monkeypatch):
+    """0.4.6 asked every 0.2 s beside the long poll; Plexamp serves one long
+    poll per client, and on sofapi 86 of 99 then failed - after a reconnect
+    the extra poller even outlived its loop. One loop now: while Fixed it
+    asks without waiting, every FIXED_POLL_S."""
     from gexis_plexamp import main
     monkeypatch.setattr(main, "FIXED_POLL_S", 0.01)
-
-    class Moved(FakePlayer):
-        def timeline(self, wait):
-            self.calls.append(("timeline", (wait,)))
-            return _timeline("playing", volume="40")
-
-    plugin = Plugin(FakeCore(), Moved(), FakeLibrary())
+    monkeypatch.setattr(main, "POLL_S", 0.01)
+    plugin = Plugin(FakeCore(), Polled(), FakeLibrary())
+    plugin._claim_is = _no_claim
+    tasks = len(asyncio.all_tasks())
     await plugin.command("output", {"fixed": True})
-    await asyncio.sleep(0.1)
-    assert ("timeline", (0,)) in plugin.player.calls
+    assert len(asyncio.all_tasks()) == tasks, "no task of its own"
+    await _watch_for(plugin, 0.08)
+    assert plugin.player.waits and set(plugin.player.waits) == {0}
     assert plugin.player.calls.count(("set_volume", (100,))) >= 3
+
     await plugin.command("output", {"fixed": False})
-    await asyncio.sleep(0.02)
+    plugin.player.waits.clear()
     plugin.player.calls.clear()
-    await asyncio.sleep(0.05)
+    await _watch_for(plugin, 0.05)
+    assert set(plugin.player.waits) == {main.POLL_S}
     assert plugin.player.calls == []
+
+
+@pytest.mark.asyncio
+async def test_after_a_failed_poll_the_next_does_not_wait(monkeypatch):
+    """A long poll Plexamp still holds answered the next one late, and the
+    plugin said "not answering" for twenty minutes (sofapi, 2026-10-11)."""
+    from gexis_plexamp import main
+    monkeypatch.setattr(main, "POLL_S", 0.01)
+    plugin = Plugin(FakeCore(), Polled(fail={1}), FakeLibrary())
+    plugin._claim_is = _no_claim
+    await _watch_for(plugin, 0.2)
+    assert plugin.player.waits[:3] == [main.POLL_S, 0, main.POLL_S]
+
+
+async def _no_claim():
+    return None
 
 
 @pytest.mark.parametrize("mode, plex", [("off", "0"), ("one", "1"), ("all", "2")])
@@ -540,7 +581,8 @@ async def test_the_watch_uses_the_long_poll_and_does_not_block_the_loop():
 
     source = inspect.getsource(_P.watch)
     # The blocking poll must not be on the event loop.
-    assert "to_thread(self.player.timeline, POLL_S)" in source
+    assert "to_thread(self.player.timeline, wait)" in source
+    assert "else POLL_S" in source, "the long poll is still the pacing outside Fixed"
     # And the loop must not *also* sleep a full interval after it - which is
     # what the first version of this test got wrong: the only remaining
     # `sleep(POLL_S)` is the retry after Plexamp stops answering, and that one

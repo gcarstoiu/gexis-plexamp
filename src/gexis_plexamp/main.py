@@ -116,7 +116,7 @@ CAPABILITIES = {
 
 #: Plexamp's own scale, and its top (Gexis ADR-0137: held there in Fixed).
 FULL = 100
-#: How often the level is looked at while the output is Fixed (`_watch_level`).
+#: How often Plexamp is asked, without waiting, while the output is Fixed.
 FIXED_POLL_S = 0.2
 
 
@@ -164,7 +164,8 @@ class Plugin:
         #: volume is a gain in its own engine and its app's slider is always
         #: shown, so while this is true the level is held at 100.
         self._fixed = False
-        self._fixed_watch: asyncio.Task | None = None
+        #: The last poll failed: the next one does not wait (see `watch`).
+        self._failed = False
 
     # --- what the core asks of us ------------------------------------------
 
@@ -242,28 +243,8 @@ class Plugin:
             logger.info("output is %s", "fixed: Plexamp is held at full level" if self._fixed else "variable")
             if self._fixed:
                 await self._hold_full(None)
-                if self._fixed_watch is None or self._fixed_watch.done():
-                    self._fixed_watch = asyncio.ensure_future(self._watch_level())
-            elif self._fixed_watch is not None:
-                self._fixed_watch.cancel()
-                self._fixed_watch = None
             return True
         raise ValueError(f"{t} is not something this plugin does")
-
-    async def _watch_level(self) -> None:
-        """**The level looked at every `FIXED_POLL_S` while Fixed** (George,
-        2026-10-11: "Can we make it faster than 1 second?"). The long poll
-        does not always wake for a volume change: measured on sofapi, the
-        level went back after 0.15 to 0.96 s, as the poll ran out; asked
-        every 0.2 s, after 0.06 to 0.20 s."""
-        while self._fixed:
-            try:
-                timeline = await asyncio.to_thread(self.player.timeline, 0)
-            except PlexampGone:
-                timeline = None
-            if timeline is not None:
-                await self._hold_full(timeline)
-            await asyncio.sleep(FIXED_POLL_S)
 
     async def _hold_full(self, timeline) -> None:
         """**Full level while the output is Fixed** (Gexis ADR-0137): set when
@@ -316,10 +297,20 @@ class Plugin:
         """Poll Plexamp and report the two edges plus what is playing."""
         while True:
             await self._claim_is()
+            # **One poller, never two** (0.4.7). Plexamp serves one long poll
+            # per client: 0.4.6 asked every 0.2 s beside this loop while Fixed,
+            # and measured on sofapi 86 of 99 long polls then failed - after a
+            # reconnect to the core the old one even kept running, and Plexamp
+            # was "not answering" until the plugin restarted. So while Fixed
+            # this loop itself asks without waiting, every FIXED_POLL_S (the
+            # level goes back within 0.2 s, George: "faster than 1 second"),
+            # and after a failed poll the next does not wait either: a poll
+            # Plexamp still holds cannot then hang the one after it.
+            wait = 0 if (self._fixed or self._failed) else POLL_S
             try:
                 # **Off the event loop**: this blocks for up to POLL_S, and the
                 # socket to the core has to keep being read while it does.
-                timeline = await asyncio.to_thread(self.player.timeline, POLL_S)
+                timeline = await asyncio.to_thread(self.player.timeline, wait)
             except PlexampGone as exc:
                 # Plexamp is a service that can restart. Unavailable is the
                 # honest published state; it is not our business to fix.
@@ -328,9 +319,11 @@ class Plugin:
                 # logged; the next line is the one that says it answers again.
                 if self._available is not False:
                     logger.info("plexamp is not answering: %s", exc)
+                self._failed = True
                 await self._available_is(False)
                 await asyncio.sleep(POLL_S)
                 continue
+            self._failed = False
             if self._available is False:
                 logger.info("plexamp is answering again")
             await self._available_is(True)
@@ -338,8 +331,9 @@ class Plugin:
             await self._metadata(timeline)
             await self._hold_full(timeline)
             # No sleep: the long poll above is the pacing. A short yield anyway,
-            # so a player answering instantly cannot spin this into a hot loop.
-            await asyncio.sleep(0.05)
+            # so a player answering instantly cannot spin this into a hot loop;
+            # while Fixed, the poll does not wait and this is the pacing.
+            await asyncio.sleep(FIXED_POLL_S if self._fixed else 0.05)
 
     async def _claim_is(self) -> None:
         """Tell the core what the *Claim token* row is, when that changes
