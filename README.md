@@ -21,6 +21,9 @@ the exercise that decides it.
 - **Leaves volume to Plexamp.** Plexamp's level is a gain inside its own audio
   engine, with no full-scale mode, so the player does not manage it: the
   Plexamp app's slider moves Plexamp's gain, the panel's moves the DAC.
+  **Except in a Fixed output** (Gexis ADR-0137): the core says so with its
+  `output` message, and the plugin sets Plexamp to 100 and puts it back
+  whenever the app's slider moves it, so the amplifier alone sets the volume.
 - Reports position, duration and transport state.
 - **Says whether the player is claimed.** The claim is made by Gexis's
   `plexamp-run` as Plexamp starts (Gexis ADR-0119): Plexamp claims itself from

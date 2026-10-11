@@ -114,6 +114,10 @@ CAPABILITIES = {
 }
 
 
+#: Plexamp's own scale, and its top (Gexis ADR-0137: held there in Fixed).
+FULL = 100
+
+
 def hello() -> dict:
     return {
         "id": ID,
@@ -153,6 +157,11 @@ class Plugin:
         #: per change (Gexis ADR-0119).
         self._claim: dict | None = None
         self._claim_status = claim.status
+        #: **Whether the player's output is Fixed** (Gexis ADR-0137): every
+        #: source at full level, the amplifier setting the volume. Plexamp's
+        #: volume is a gain in its own engine and its app's slider is always
+        #: shown, so while this is true the level is held at 100.
+        self._fixed = False
 
     # --- what the core asks of us ------------------------------------------
 
@@ -225,7 +234,25 @@ class Plugin:
             raise ValueError("the core does not manage this renderer's volume")
         if t == "setting":
             return self._setting(message.get("key"), message.get("value"))
+        if t == "output":
+            self._fixed = bool(message.get("fixed"))
+            logger.info("output is %s", "fixed: Plexamp is held at full level" if self._fixed else "variable")
+            if self._fixed:
+                await self._hold_full(None)
+            return True
         raise ValueError(f"{t} is not something this plugin does")
+
+    async def _hold_full(self, timeline) -> None:
+        """**Full level while the output is Fixed** (Gexis ADR-0137): set when
+        told, and put back whenever the timeline shows the app moved it."""
+        if not self._fixed or (timeline is not None and timeline.volume in (None, FULL)):
+            return
+        if timeline is not None:
+            logger.info("plexamp's volume moved to %s in a Fixed output; back to %s", timeline.volume, FULL)
+        try:
+            await asyncio.to_thread(self.player.set_volume, FULL)
+        except PlexampGone as exc:
+            logger.info("plexamp did not take full level: %s", exc)
 
     def _transport(self, command: str, argument):
         # **`play` and `pause` are the same verb here**, and that is Plexamp's
@@ -286,6 +313,7 @@ class Plugin:
             await self._available_is(True)
             await self._edges(timeline)
             await self._metadata(timeline)
+            await self._hold_full(timeline)
             # No sleep: the long poll above is the pacing. A short yield anyway,
             # so a player answering instantly cannot spin this into a hot loop.
             await asyncio.sleep(0.05)

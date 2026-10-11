@@ -407,6 +407,39 @@ async def test_a_level_from_the_core_is_refused():
     assert plugin.player.calls == []
 
 
+@pytest.mark.asyncio
+async def test_a_fixed_output_puts_plexamp_at_full_level():
+    """Gexis ADR-0137: in Fixed every source plays at full level and the
+    amplifier sets the volume. Plexamp's app always shows its slider, so the
+    plugin sets 100 when told and keeps it there."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    assert await plugin.command("output", {"fixed": True}) is True
+    assert plugin.player.calls == [("set_volume", (100,))]
+
+
+@pytest.mark.asyncio
+async def test_in_fixed_a_level_moved_in_the_app_goes_back_to_full():
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin.command("output", {"fixed": True})
+    plugin.player.calls.clear()
+    await plugin._hold_full(_timeline("playing", volume="40"))
+    await plugin._hold_full(_timeline("playing", volume="100"))
+    await plugin._hold_full(_timeline("playing"))
+    assert plugin.player.calls == [("set_volume", (100,))]
+
+
+@pytest.mark.asyncio
+async def test_a_variable_output_leaves_plexamp_s_level_alone():
+    """Back to Software or Hardware, the app's slider is the owner's again:
+    nothing is set, either when told or when the slider moves."""
+    plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
+    await plugin.command("output", {"fixed": True})
+    plugin.player.calls.clear()
+    assert await plugin.command("output", {"fixed": False}) is True
+    await plugin._hold_full(_timeline("playing", volume="40"))
+    assert plugin.player.calls == []
+
+
 @pytest.mark.parametrize("mode, plex", [("off", "0"), ("one", "1"), ("all", "2")])
 @pytest.mark.asyncio
 async def test_repeat_goes_back_the_way_it_came(mode, plex):
