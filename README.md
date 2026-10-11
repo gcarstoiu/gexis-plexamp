@@ -23,7 +23,8 @@ the exercise that decides it.
   Plexamp app's slider moves Plexamp's gain, the panel's moves the DAC.
   **Except in a Fixed output** (Gexis ADR-0137): the core says so with its
   `output` message, and the plugin sets Plexamp to 100 and puts it back
-  whenever the app's slider moves it, so the amplifier alone sets the volume.
+  whenever the app's slider moves it - within a fifth of a second, as it
+  looks every 0.2 s while Fixed - so the amplifier alone sets the volume.
 - Reports position, duration and transport state.
 - **Says whether the player is claimed.** The claim is made by Gexis's
   `plexamp-run` as Plexamp starts (Gexis ADR-0119): Plexamp claims itself from

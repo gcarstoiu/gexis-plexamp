@@ -116,6 +116,8 @@ CAPABILITIES = {
 
 #: Plexamp's own scale, and its top (Gexis ADR-0137: held there in Fixed).
 FULL = 100
+#: How often the level is looked at while the output is Fixed (`_watch_level`).
+FIXED_POLL_S = 0.2
 
 
 def hello() -> dict:
@@ -162,6 +164,7 @@ class Plugin:
         #: volume is a gain in its own engine and its app's slider is always
         #: shown, so while this is true the level is held at 100.
         self._fixed = False
+        self._fixed_watch: asyncio.Task | None = None
 
     # --- what the core asks of us ------------------------------------------
 
@@ -239,8 +242,28 @@ class Plugin:
             logger.info("output is %s", "fixed: Plexamp is held at full level" if self._fixed else "variable")
             if self._fixed:
                 await self._hold_full(None)
+                if self._fixed_watch is None or self._fixed_watch.done():
+                    self._fixed_watch = asyncio.ensure_future(self._watch_level())
+            elif self._fixed_watch is not None:
+                self._fixed_watch.cancel()
+                self._fixed_watch = None
             return True
         raise ValueError(f"{t} is not something this plugin does")
+
+    async def _watch_level(self) -> None:
+        """**The level looked at every `FIXED_POLL_S` while Fixed** (George,
+        2026-10-11: "Can we make it faster than 1 second?"). The long poll
+        does not always wake for a volume change: measured on sofapi, the
+        level went back after 0.15 to 0.96 s, as the poll ran out; asked
+        every 0.2 s, after 0.06 to 0.20 s."""
+        while self._fixed:
+            try:
+                timeline = await asyncio.to_thread(self.player.timeline, 0)
+            except PlexampGone:
+                timeline = None
+            if timeline is not None:
+                await self._hold_full(timeline)
+            await asyncio.sleep(FIXED_POLL_S)
 
     async def _hold_full(self, timeline) -> None:
         """**Full level while the output is Fixed** (Gexis ADR-0137): set when

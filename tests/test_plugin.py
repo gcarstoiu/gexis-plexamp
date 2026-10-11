@@ -414,7 +414,8 @@ async def test_a_fixed_output_puts_plexamp_at_full_level():
     plugin sets 100 when told and keeps it there."""
     plugin = Plugin(FakeCore(), FakePlayer(), FakeLibrary())
     assert await plugin.command("output", {"fixed": True}) is True
-    assert plugin.player.calls == [("set_volume", (100,))]
+    assert plugin.player.calls[0] == ("set_volume", (100,))
+    await plugin.command("output", {"fixed": False})
 
 
 @pytest.mark.asyncio
@@ -425,7 +426,8 @@ async def test_in_fixed_a_level_moved_in_the_app_goes_back_to_full():
     await plugin._hold_full(_timeline("playing", volume="40"))
     await plugin._hold_full(_timeline("playing", volume="100"))
     await plugin._hold_full(_timeline("playing"))
-    assert plugin.player.calls == [("set_volume", (100,))]
+    assert [c for c in plugin.player.calls if c[0] == "set_volume"] == [("set_volume", (100,))]
+    await plugin.command("output", {"fixed": False})
 
 
 @pytest.mark.asyncio
@@ -437,6 +439,31 @@ async def test_a_variable_output_leaves_plexamp_s_level_alone():
     plugin.player.calls.clear()
     assert await plugin.command("output", {"fixed": False}) is True
     await plugin._hold_full(_timeline("playing", volume="40"))
+    assert plugin.player.calls == []
+
+
+@pytest.mark.asyncio
+async def test_while_fixed_the_level_is_looked_at_often_and_no_longer_after(monkeypatch):
+    """George: "Can we make it faster than 1 second?" - the long poll did not
+    always wake for a volume change; while Fixed the level is asked for on
+    its own, every FIXED_POLL_S, and not once the output is variable."""
+    from gexis_plexamp import main
+    monkeypatch.setattr(main, "FIXED_POLL_S", 0.01)
+
+    class Moved(FakePlayer):
+        def timeline(self, wait):
+            self.calls.append(("timeline", (wait,)))
+            return _timeline("playing", volume="40")
+
+    plugin = Plugin(FakeCore(), Moved(), FakeLibrary())
+    await plugin.command("output", {"fixed": True})
+    await asyncio.sleep(0.1)
+    assert ("timeline", (0,)) in plugin.player.calls
+    assert plugin.player.calls.count(("set_volume", (100,))) >= 3
+    await plugin.command("output", {"fixed": False})
+    await asyncio.sleep(0.02)
+    plugin.player.calls.clear()
+    await asyncio.sleep(0.05)
     assert plugin.player.calls == []
 
 
