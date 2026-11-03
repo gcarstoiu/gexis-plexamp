@@ -4,6 +4,7 @@
   "kind": "renderer",
   "version": "0.5.0",
   "run": "run",
+  "software": "Plexamp",
   "summary": "Plays your Plex library through the player, with the Plexamp app on your phone as the remote.",
   "label": "Plexamp Active",
   "accent": "#e5a00d",
