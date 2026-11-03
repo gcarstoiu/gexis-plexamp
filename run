@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Plexamp as a Gexis Player catalogue plugin (Gexis ADR-0174): the adapter,
+# which downloads Plexamp's software when its pin changes and runs Plexamp as
+# its child (src/gexis_plexamp/launch.py).
+here=$(dirname "$(readlink -f "$0")")
+PYTHONPATH="$here/src" exec /usr/bin/python3 -m gexis_plexamp.main

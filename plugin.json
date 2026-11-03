@@ -1,9 +1,10 @@
 {
   "id": "plexamp",
   "name": "Plexamp",
-  "summary": "Plays your Plex library through the player, with the Plexamp app on your phone as the remote.",
   "kind": "renderer",
-  "unit": "plexamp.service",
+  "version": "0.5.0",
+  "run": "run",
+  "summary": "Plays your Plex library through the player, with the Plexamp app on your phone as the remote.",
   "label": "Plexamp Active",
   "accent": "#e5a00d",
   "status": "Ready",

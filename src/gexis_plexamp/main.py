@@ -16,9 +16,10 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 import time
 
-from gexis_plexamp import claim
+from gexis_plexamp import claim, launch
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
 from gexis_plexamp.server import Library, token as server_token
@@ -452,7 +453,39 @@ def _seconds(milliseconds):
     return None if milliseconds is None else round(milliseconds / 1000)
 
 
-async def run(socket_path: str, base: str) -> None:
+class Software:
+    """**Plexamp's download, said to the core** (Gexis ADR-0174): the latest
+    `software` event, sent at once while connected and again on every
+    connection, so the switch and setup show it as the player's own download
+    was shown."""
+
+    def __init__(self) -> None:
+        self.latest: dict | None = None
+        self.core: Core | None = None
+        self._loop = asyncio.get_running_loop()
+
+    def report(self, status: dict) -> None:
+        """From any thread: the download runs in one of its own."""
+        self._loop.call_soon_threadsafe(self._set, status)
+
+    def _set(self, status: dict) -> None:
+        self.latest = status
+        if self.core is not None:
+            asyncio.ensure_future(self._send(self.core))
+
+    async def attach(self, core: Core | None) -> None:
+        self.core = core
+        if core is not None and self.latest is not None:
+            await self._send(core)
+
+    async def _send(self, core: Core) -> None:
+        try:
+            await core.event("software", **self.latest)
+        except (ConnectionError, OSError):
+            pass
+
+
+async def run(socket_path: str, base: str, software: Software | None = None) -> None:
     player = Plexamp(base)
     library = Library()
     while True:
@@ -471,20 +504,39 @@ async def run(socket_path: str, base: str) -> None:
             await asyncio.sleep(RECONNECT_S)
             continue
         plugin = Plugin(core, player, library)
+        if software is not None:
+            await software.attach(core)
         watching = asyncio.ensure_future(plugin.watch())
         try:
             await core.serve(plugin.command)
         finally:
             watching.cancel()
+            if software is not None:
+                await software.attach(None)
             await core.close()
         logger.info("disconnected; reconnecting in %.0fs", RECONNECT_S)
         await asyncio.sleep(RECONNECT_S)
 
 
+async def plugin_and_plexamp(socket_path: str, base: str) -> int:
+    """**The catalogue plugin** (Gexis ADR-0174): the adapter, and Plexamp as
+    its child (`launch`). When Plexamp ends the plugin ends with its code, and
+    the unit starts both again - a takeover kills the unit whole."""
+    software = Software()
+    adapter = asyncio.ensure_future(run(socket_path, base, software))
+    try:
+        return await launch.run_plexamp(software.report)
+    finally:
+        adapter.cancel()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plexamp as a Gexis plugin")
-    parser.add_argument("--socket", default=os.environ.get("GEXIS_SOCKET", "/run/gexis/plugins.sock"))
+    parser.add_argument("--socket", default=os.environ.get(
+        "GEXIS_PLUGIN_SOCKET", os.environ.get("GEXIS_SOCKET", "/run/gexis/plugins.sock")))
     parser.add_argument("--plexamp", default=os.environ.get("PLEXAMP_URL", "http://127.0.0.1:32500"))
+    parser.add_argument("--adapter-only", action="store_true",
+                        help="the adapter alone, Plexamp run elsewhere (the player's own unit until 1.12.x)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(
@@ -492,7 +544,10 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     try:
-        asyncio.run(run(args.socket, args.plexamp))
+        if args.adapter_only:
+            asyncio.run(run(args.socket, args.plexamp))
+        else:
+            sys.exit(asyncio.run(plugin_and_plexamp(args.socket, args.plexamp)))
     except KeyboardInterrupt:
         pass
 

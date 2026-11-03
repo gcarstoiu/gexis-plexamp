@@ -26,11 +26,19 @@ the exercise that decides it.
   whenever the app's slider moves it - within a fifth of a second: while
   Fixed its one poll of Plexamp asks every 0.2 s instead of waiting - so the amplifier alone sets the volume.
 - Reports position, duration and transport state.
-- **Says whether the player is claimed.** The claim is made by Gexis's
-  `plexamp-run` as Plexamp starts (Gexis ADR-0119): Plexamp claims itself from
-  `PLEXAMP_CLAIM_TOKEN`, named after the device. This plugin reads the result -
-  Plexamp's own token and `plexamp-run`'s `claim.json` - and reports it on the
-  *Claim token* row: *Claimed*, or *The claim did not work*.
+- **Starts Plexamp itself** (Gexis ADR-0174): downloads Plex's Plexamp from
+  the address `plexamp.pin` names, checks its sha256 and unpacks it in the
+  plugin's own folder, once per pin, saying each step to the player (its
+  switch and setup show the download); clears Plexamp's saved queue, keeping
+  its volume (Gexis ADR-0091); then runs Plexamp as its child, named after the
+  device. When Plexamp ends, the plugin ends with it and the player starts
+  both again.
+- **Claims it** (Gexis ADR-0119): Plexamp claims itself from
+  `PLEXAMP_CLAIM_TOKEN` when it holds no claim; the plugin hands a token over
+  once, sets an existing store aside while a new claim is tried and puts it
+  back if Plexamp's exit says the claim failed, and keeps what happened in
+  `claim.json` - the token's hash, never the token. It reports the result on
+  the *Claim token* row: *Claimed*, or *The claim did not work*.
 
 ## Where the names come from
 
@@ -76,7 +84,8 @@ PYTHONPATH=src python3 -m gexis_plexamp.main --verbose
 ```
 
 `--socket` and `--plexamp` override the defaults
-(`/run/gexis/plugins.sock`, `http://127.0.0.1:32500`).
+(`/run/gexis/plugins.sock`, `http://127.0.0.1:32500`); `--adapter-only`
+runs the adapter without starting Plexamp.
 
 ## The mark
 
@@ -94,8 +103,11 @@ layout, where it is being stretched about 1.4×.
 
 ## Installing it
 
-It ships in the Gexis image, pinned by checksum, the way the Beszel agent does.
-`plugin.json` and `gexis-plexamp.service` here are what that image installs.
+From the player's plugin catalogue (*Settings → Plugins → Add plugins*), or
+in setup. Until Gexis Player 1.12.x it shipped in the image; a player that
+had it switched on carries it over, its claim kept. `./package.sh` builds
+`dist/plexamp-<version>.tar.gz`: `plugin.json`, `run`, `plexamp.pin`, the
+mark and the code - Plexamp itself is downloaded on the player.
 
 ## Licence
 

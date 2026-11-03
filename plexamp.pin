@@ -1,0 +1,6 @@
+# Plexamp's software, Plex's: downloaded on the player, never shipped (Gexis
+# ADR-0100). Raise with a new plugin version, after trying it on a player.
+URL=https://plexamp.plex.tv/headless/Plexamp-Linux-headless-v4.13.2.tar.bz2
+SHA256=86e5ede3d852a87099a106f2cc6b83e4ec1350000176d83fbcedb83950c48041
+LABEL="Plexamp 4.13.2"
+FROM=Plex
