@@ -9,7 +9,7 @@ for the plugin and Plexamp, so all of that happens here, in order:
 
 1. **Plexamp's software**, Plex's and not ours to ship (Gexis ADR-0100):
    downloaded from the address `plexamp.pin` names, checked against its
-   sha256, unpacked whole into the plugin's own folder - once per pin.
+   sha256, unpacked whole into the plugin's `~/.cache` - once per pin.
    Each step is reported (`software` events) so the switch and setup show
    it, as they showed the player's own download.
 2. **No saved queue** (Gexis ADR-0091): Plexamp restores its queue, transport
@@ -21,7 +21,9 @@ for the plugin and Plexamp, so all of that happens here, in order:
    with an error is the claim failing.
 
 `HOME` is the plugin's own folder (the sandbox sets it), so Plexamp's store
-is `~/.local/share/Plexamp`, where the adapter reads its token.
+is `~/.local/share/Plexamp`, where the adapter reads its token. **What is
+Plex's or a cache goes in `~/.cache`**, which the player's backups leave out
+(Gexis ADR-0174): a backup holds the claim, not 200 MB of software and cache.
 """
 from __future__ import annotations
 
@@ -54,6 +56,12 @@ def home() -> Path:
     return Path(os.environ.get("HOME") or Path.home())
 
 
+def cache(base: Path | None = None) -> Path:
+    """Plexamp's software and every cache: left out of the player's backups,
+    and downloaded or rebuilt again after a restore."""
+    return (base or home()) / ".cache"
+
+
 def settings_dir(base: Path | None = None) -> Path:
     return (base or home()) / ".local/share/Plexamp/Settings"
 
@@ -79,7 +87,7 @@ def read_pin(path: Path = PIN) -> dict[str, str]:
 
 
 def installed(pin: dict, base: Path | None = None) -> bool:
-    base = base or home()
+    base = cache(base)
     try:
         stamp = (base / "plexamp.sha256").read_text().strip()
     except OSError:
@@ -95,7 +103,7 @@ def _status(pin: dict, state: str, **more) -> dict:
 def fetch(pin: dict, report: Report, base: Path | None = None,
           opener: Callable = urllib.request.urlopen) -> bool:
     """Download, check and unpack it, saying each step. True once installed."""
-    base = base or home()
+    base = cache(base)
     base.mkdir(parents=True, exist_ok=True)
     partial = base / "plexamp.download"
     for attempt in range(1, ATTEMPTS + 1):
@@ -151,6 +159,32 @@ def _unpack(archive: Path, base: Path) -> None:
     top.rename(base / "plexamp")
     shutil.rmtree(old, ignore_errors=True)
     shutil.rmtree(work, ignore_errors=True)
+
+
+def keep_out_of_backups(base: Path | None = None) -> None:
+    """**Plexamp's audio engine writes its cache to `~/Library/Caches`**,
+    whatever the platform (its library's own path, Plexamp 4.13.2; 158 MB
+    after a few plays on sofapi, 2026-11-03), so `~/Library` is a link into
+    `~/.cache`. 0.5.0 kept the software in the folder itself: moved once.
+    Anything found in both places is Plex's or a cache, and the copy outside
+    goes."""
+    base = base or home()
+    into = cache(base)
+    into.mkdir(parents=True, exist_ok=True)
+    for name in ("plexamp", "plexamp.sha256", "Library"):
+        old = base / name
+        if old.is_symlink() or not old.exists():
+            continue
+        if (into / name).exists():
+            shutil.rmtree(old) if old.is_dir() else old.unlink()
+        else:
+            old.rename(into / name)
+    (into / "Library").mkdir(exist_ok=True)
+    library = base / "Library"
+    if library.is_symlink() and os.readlink(library) == ".cache/Library":
+        return
+    library.unlink(missing_ok=True)  # a link to anywhere else
+    library.symlink_to(".cache/Library")
 
 
 # --- 2. No saved queue ----------------------------------------------------------
@@ -284,14 +318,16 @@ async def run_plexamp(report: Report, pin_path: Path = PIN) -> int:
     (a signal's as 128 + n), for the plugin to exit with."""
     pin = read_pin(pin_path)
     base = home()
+    keep_out_of_backups(base)
     if installed(pin, base):
         report(_status(pin, "installed"))
     elif not await asyncio.to_thread(fetch, pin, report, base):
         return 69  # EX_UNAVAILABLE: retried by the unit, the row says why
     start_idle()
     env = prepare(dict(os.environ))
-    process = await asyncio.create_subprocess_exec(NODE, str(base / "plexamp/js/index.js"),
-                                                   cwd=str(base / "plexamp"), env=env)
+    software = cache(base) / "plexamp"
+    process = await asyncio.create_subprocess_exec(NODE, str(software / "js/index.js"),
+                                                   cwd=str(software), env=env)
     returncode = await process.wait()
     ended(returncode)
     logger.info("Plexamp ended (%s)", returncode)

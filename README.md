@@ -28,7 +28,8 @@ the exercise that decides it.
 - Reports position, duration and transport state.
 - **Starts Plexamp itself** (Gexis ADR-0174): downloads Plex's Plexamp from
   the address `plexamp.pin` names, checks its sha256 and unpacks it in the
-  plugin's own folder, once per pin, saying each step to the player (its
+  plugin's `~/.cache`, once per pin (with the cache Plexamp's audio engine
+  writes to `~/Library`, linked there: the player's backups leave it out), saying each step to the player (its
   switch and setup show the download); clears Plexamp's saved queue, keeping
   its volume (Gexis ADR-0091); then runs Plexamp as its child, named after the
   device. When Plexamp ends, the plugin ends with it and the player starts

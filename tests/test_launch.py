@@ -185,7 +185,7 @@ def test_it_downloads_checks_and_swaps_in_the_pinned_software(tmp_path):
            "LABEL": "Plexamp 4.13.2", "FROM": "Plex"}
     said = []
     assert launch.fetch(pin, said.append, tmp_path, opener=lambda url, timeout: _Response(archive))
-    assert (tmp_path / "plexamp/js/index.js").read_text() == "console.log('plexamp')"
+    assert (tmp_path / ".cache/plexamp/js/index.js").read_text() == "console.log('plexamp')"
     assert launch.installed(pin, tmp_path)
     assert [s["state"] for s in said][-3:] == ["verifying", "installing", "installed"]
     assert all(s["label"] == "Plexamp 4.13.2" and s["from"] == "Plex" for s in said)
@@ -197,7 +197,41 @@ def test_a_download_that_is_not_the_pinned_one_is_refused(tmp_path, monkeypatch)
     said = []
     assert not launch.fetch(pin, said.append, tmp_path, opener=lambda url, timeout: _Response(_archive()))
     assert said[-1]["state"] == "failed" and "did not work" in said[-1]["error"]
-    assert not (tmp_path / "plexamp").exists() and not launch.installed(pin, tmp_path)
+    assert not (tmp_path / ".cache/plexamp").exists() and not launch.installed(pin, tmp_path)
+
+
+def test_the_software_and_the_engine_s_cache_live_where_backups_do_not_look(tmp_path):
+    """Gexis ADR-0174: a backup leaves `~/.cache` out. Plexamp's engine writes
+    `~/Library/Caches` - a link into it; 0.5.0's software moves there once."""
+    (tmp_path / "plexamp/js").mkdir(parents=True)
+    (tmp_path / "plexamp/js/index.js").write_text("plexamp")
+    (tmp_path / "plexamp.sha256").write_text("86e5\n")
+    (tmp_path / "Library/Caches").mkdir(parents=True)
+    (tmp_path / "Library/Caches/blob").write_text("cached")
+    launch.keep_out_of_backups(tmp_path)
+    assert (tmp_path / ".cache/plexamp/js/index.js").read_text() == "plexamp"
+    assert (tmp_path / ".cache/plexamp.sha256").read_text() == "86e5\n"
+    assert not (tmp_path / "plexamp").exists() and not (tmp_path / "plexamp.sha256").exists()
+    assert (tmp_path / "Library").is_symlink() and (tmp_path / "Library/Caches/blob").read_text() == "cached"
+    launch.keep_out_of_backups(tmp_path)  # every start: nothing more to do
+    assert (tmp_path / "Library/Caches/blob").exists()
+
+
+def test_a_cache_found_twice_keeps_the_one_in_the_cache(tmp_path):
+    """The player's carry-over moves pi's Library into `~/.cache` (Gexis
+    1.12.x); a Library the engine had already begun in the folder goes."""
+    (tmp_path / ".cache/Library/Caches").mkdir(parents=True)
+    (tmp_path / ".cache/Library/Caches/old").write_text("carried")
+    (tmp_path / "Library/Caches").mkdir(parents=True)
+    (tmp_path / "Library/Caches/new").write_text("begun")
+    launch.keep_out_of_backups(tmp_path)
+    assert (tmp_path / "Library/Caches/old").exists() and not (tmp_path / "Library/Caches/new").exists()
+
+
+def test_a_fresh_folder_gets_the_link_before_plexamp_starts(tmp_path):
+    launch.keep_out_of_backups(tmp_path)
+    assert (tmp_path / "Library").resolve() == (tmp_path / ".cache/Library").resolve()
+    assert (tmp_path / ".cache/Library").is_dir()
 
 
 def test_the_pin_shipped_names_an_address_a_checksum_and_a_label():
