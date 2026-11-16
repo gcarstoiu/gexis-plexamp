@@ -2,7 +2,7 @@
   "id": "plexamp",
   "name": "Plexamp",
   "kind": "renderer",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "run": "run",
   "software": "Plexamp",
   "summary": "Plays your Plex library through the player, with the Plexamp app on your phone as the remote.",
@@ -21,6 +21,14 @@
       "default": null,
       "env": "PLEXAMP_CLAIM_TOKEN",
       "again": "Claim again"
+    },
+    {
+      "key": "plex_info",
+      "type": "toggle",
+      "label": "Information from Plex",
+      "marks": "N",
+      "note": "Artist and album information from your Plex server, ahead of the internet's.",
+      "default": true
     }
   ]
 }

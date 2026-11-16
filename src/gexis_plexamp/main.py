@@ -22,7 +22,7 @@ import time
 from gexis_plexamp import claim, launch
 from gexis_plexamp.contract import Core, Refused, RECONNECT_S
 from gexis_plexamp.plexamp import Plexamp, PlexampGone
-from gexis_plexamp.server import Library, token as server_token
+from gexis_plexamp.server import Lending, Library, token as server_token
 
 logger = logging.getLogger("gexis_plexamp")
 
@@ -160,6 +160,11 @@ class Plugin:
         #: per change (Gexis ADR-0119).
         self._claim: dict | None = None
         self._claim_status = claim.status
+        #: **What was last lent the core** (Gexis ADR-0184): Plexamp's server
+        #: and that server's token, so the core can ask the library about
+        #: whatever plays. None until said, so a connection always says it.
+        self._lent: dict | None = None
+        self._lending = Lending().now
         #: **Whether the player's output is Fixed** (Gexis ADR-0137): every
         #: source at full level, the amplifier setting the volume. Plexamp's
         #: volume is a gain in its own engine and its app's slider is always
@@ -298,6 +303,7 @@ class Plugin:
         """Poll Plexamp and report the two edges plus what is playing."""
         while True:
             await self._claim_is()
+            await self._library_is()
             # **One poller, never two** (0.4.7). Plexamp serves one long poll
             # per client: 0.4.6 asked every 0.2 s beside this loop while Fixed,
             # and measured on sofapi 86 of 99 long polls then failed - after a
@@ -344,6 +350,21 @@ class Plugin:
         if now != self._claim:
             self._claim = now
             await self.core.event("row", key="claim_token", **now)
+
+    async def _library_is(self) -> None:
+        """Lend the core Plexamp's library, when what can be lent changes
+        (Gexis ADR-0184): the server, its address on this network and its
+        token, or nothing. **Never logged**: the token is the account's, and
+        the address is the home network's."""
+        try:
+            now = self._lending()
+        except Exception as exc:  # noqa: BLE001 - lending is never worth the loop
+            logger.warning("could not read what Plexamp keeps of its server: %s", type(exc).__name__)
+            return
+        if now != self._lent:
+            self._lent = now
+            await self.core.event("library", kind="plex", **now)
+            logger.info("lending the core %s", "Plexamp's library" if now.get("url") else "no library")
 
     async def _available_is(self, available: bool) -> None:
         if available != self._available:
