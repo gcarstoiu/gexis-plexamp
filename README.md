@@ -44,7 +44,9 @@ the exercise that decides it.
   to, its address on the local network and that server's own token, sent to
   the core as the contract's `library` event whenever they change. The core
   then asks that library about whatever plays - Lyrion, Spotify and Bluetooth
-  included - ahead of the internet's sources, with no second sign-in. It holds
+  included - ahead of the internet's sources, with no second sign-in; its
+  lyrics only behind LRCLIB's, and only while they are on screen, since the
+  server serves about five every ten minutes (Gexis Finding 153). It holds
   what is lent in memory only. Nothing is lent for a server that is not on the
   local network. The *Information from Plex* row switches it off, and is
   greyed until Plexamp is claimed. The token and the address are never logged.

@@ -27,7 +27,7 @@
       "type": "toggle",
       "label": "Information from Plex",
       "marks": "N",
-      "note": "Artist and album information from your Plex server, ahead of the internet's.",
+      "note": "Artist and album information from your Plex server, ahead of the internet's; its lyrics where the internet has none timed.",
       "default": true
     }
   ]
